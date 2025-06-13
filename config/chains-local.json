@@ -1,0 +1,59 @@
+{
+  "description": "Local testing configuration for OIF Protocol Solver",
+  "environment": "local",
+  "chains": {
+    "origin": {
+      "chainId": 31337,
+      "name": "Anvil Origin Chain",
+      "rpcUrl": "http://127.0.0.1:8545",
+      "isLocal": true,
+      "contracts": {
+        "SettlerCompact": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+        "TheCompact": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      }
+    },
+    "destination": {
+      "chainId": 31338,
+      "name": "Anvil Destination Chain", 
+      "rpcUrl": "http://127.0.0.1:8546",
+      "isLocal": true,
+      "contracts": {
+        "CoinFiller": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      }
+    }
+  },
+  "solver": {
+    "api": {
+      "port": 3000,
+      "host": "localhost"
+    },
+    "gas": {
+      "maxGasPrice": "100000000000",
+      "gasMultiplier": 1.2
+    },
+    "validation": {
+      "enableSignatureValidation": false,
+      "enableExpiryValidation": true,
+      "minFillDeadline": 30
+    }
+  },
+  "testing": {
+    "sampleOrder": {
+      "user": "0x1234567890123456789012345678901234567890",
+      "nonce": 1,
+      "originChainId": 31337,
+      "expires": 0,
+      "fillDeadline": 0,
+      "localOracle": "0x0000000000000000000000000000000000000000",
+      "inputs": [[1, "1000000000000000000"]],
+      "outputs": [{
+        "remoteOracle": "0x0000000000000000000000000000000000000000",
+        "remoteFiller": "0x0000000000000000000000000000000000000000",
+        "chainId": 31338,
+        "token": "0x0000000000000000000000000000000000000000",
+        "amount": "990000000000000000",
+        "recipient": "0x1234567890123456789012345678901234567890"
+      }]
+    }
+  }
+} 

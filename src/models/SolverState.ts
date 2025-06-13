@@ -1,0 +1,1 @@
+// SolverState.ts - Solver state representation 

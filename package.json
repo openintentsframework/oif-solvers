@@ -1,0 +1,48 @@
+{
+  "name": "oif-protocol-solver",
+  "version": "1.0.0",
+  "description": "Minimal OIF Protocol Solver POC",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "start:local": "node run-solver-local.js",
+    "test": "echo \"No tests specified yet\"",
+    "test-config": "node test-config-loader.js",
+    "test-contracts": "node -e \"const { ConfigLoader } = require('./dist/src/config/ConfigLoader'); const { ContractFactory } = require('./dist/src/contracts/ContractFactory'); const config = ConfigLoader.loadFromFile('./config/chains-local.json'); const contractFactory = new ContractFactory(); ConfigLoader.configureContractFactory(contractFactory, config); console.log('✅ ContractFactory integration test passed!');\"",
+    "check-wallet": "node check-wallet.js",
+    "clean": "rm -rf dist",
+    "test-api": "ts-node test-api-server.ts",
+    "test-api-workflow": "ts-node test-api-server.ts --workflow",
+    "test-api-docs": "ts-node test-api-server.ts --help",
+    "test-services": "ts-node test-core-services.ts",
+    "test-chain-config": "ts-node test-chain-config.ts"
+  },
+  "keywords": [
+    "oif",
+    "protocol",
+    "solver",
+    "cross-chain"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.8.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.8.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.4",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.2.0"
+  }
+}
