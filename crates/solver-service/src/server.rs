@@ -3,16 +3,20 @@
 //! This module provides a minimal HTTP server infrastructure 
 //! for the OIF Solver API.
 
-use actix_cors::Cors;
-use actix_web::{
-    middleware::Logger,
-    web::{self, Data, Json},
-    App, HttpResponse, HttpServer, Result as ActixResult,
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::Json,
+    routing::post,
+    Router,
 };
 use solver_config::ApiConfig;
 use solver_core::SolverEngine;
-use solver_types::{ErrorResponse, GetQuoteRequest};
+use solver_types::{ErrorResponse, GetQuoteRequest, GetQuoteResponse};
 use std::sync::Arc;
+use tokio::net::TcpListener;
+use tower::ServiceBuilder;
+use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
 /// Shared application state for the API server.
@@ -31,52 +35,49 @@ pub async fn start_server(
     solver: Arc<SolverEngine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_state = AppState { solver };
+
+    // Build the router with /api base path and quote endpoint
+    let app = Router::new()
+        .nest("/api", Router::new()
+            .route("/quote", post(handle_quote))
+        )
+        .layer(
+            ServiceBuilder::new()
+                .layer(CorsLayer::permissive()),
+        )
+        .with_state(app_state);
+
     let bind_address = format!("{}:{}", config.host, config.port);
+    let listener = TcpListener::bind(&bind_address).await?;
     
     info!("OIF Solver API server starting on {}", bind_address);
-
-    HttpServer::new(move || {
-        App::new()
-            .app_data(Data::new(app_state.clone()))
-            .app_data(web::JsonConfig::default().limit(config.max_request_size))
-            .wrap(Logger::default())
-            .wrap(
-                Cors::default()
-                    .allow_any_origin()
-                    .allow_any_method()
-                    .allow_any_header()
-                    .max_age(3600),
-            )
-            .service(
-                web::scope("/api")
-                    .route("/quote", web::post().to(handle_quote))
-            )
-    })
-    .bind(&bind_address)?
-    .run()
-    .await?;
-
+    
+    axum::serve(listener, app).await?;
+    
     Ok(())
 }
 
-/// Handles POST /quote requests.
+/// Handles POST /api/quote requests.
 ///
 /// This endpoint processes quote requests and returns price estimates
 /// for cross-chain intents following the ERC-7683 standard.
 async fn handle_quote(
-    app_state: Data<AppState>,
-    request: Json<GetQuoteRequest>,
-) -> ActixResult<HttpResponse> {
-    match crate::apis::quote::process_quote_request(request.into_inner(), &app_state.solver).await {
-        Ok(response) => Ok(HttpResponse::Ok().json(response)),
+    State(state): State<AppState>,
+    Json(request): Json<GetQuoteRequest>,
+) -> Result<Json<GetQuoteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    match crate::apis::quote::process_quote_request(request, &state.solver).await {
+        Ok(response) => Ok(Json(response)),
         Err(e) => {
             warn!("Quote request failed: {}", e);
-            Ok(HttpResponse::BadRequest().json(ErrorResponse {
-                error: "QUOTE_ERROR".to_string(),
-                message: e.to_string(),
-                details: None,
-                retry_after: None,
-            }))
+            Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "QUOTE_ERROR".to_string(),
+                    message: e.to_string(),
+                    details: None,
+                    retry_after: None,
+                }),
+            ))
         }
     }
 } 
