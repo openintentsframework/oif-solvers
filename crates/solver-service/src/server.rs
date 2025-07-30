@@ -1,8 +1,7 @@
 //! HTTP server for the OIF Solver API.
 //!
-//! This module provides a minimal HTTP server infrastructure specifically for
-//! the endpoint, allowing clients to request price estimates for 
-//! cross-chain intents.
+//! This module provides a minimal HTTP server infrastructure 
+//! for the OIF Solver API.
 
 use actix_cors::Cors;
 use actix_web::{
