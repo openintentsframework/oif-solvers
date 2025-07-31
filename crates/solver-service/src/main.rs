@@ -73,35 +73,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let solver = Arc::new(solver);
 	tracing::info!("Loaded solver engine");
 
-	// Start API server if enabled
-	if let Some(api_config) = &config.api {
-		if api_config.enabled {
-			let api_solver = Arc::clone(&solver);
-			let api_config = api_config.clone();
-			
-			// Start both the solver and the API server concurrently
-			let solver_task = solver.run();
-			let api_task = server::start_server(api_config, api_solver);
-			
-			tracing::info!("Starting solver and API server");
-			
-			// Run both tasks concurrently
-			tokio::select! {
-				result = solver_task => {
-					tracing::info!("Solver finished");
-					result?;
-				}
-				result = api_task => {
-					tracing::info!("API server finished");
-					result?;
-				}
+	// Check if API server should be started
+	let api_enabled = config.api.as_ref().map_or(false, |api| api.enabled);
+	
+	if api_enabled {
+		let api_config = config.api.as_ref().unwrap().clone();
+		let api_solver = Arc::clone(&solver);
+		
+		// Start both the solver and the API server concurrently
+		let solver_task = solver.run();
+		let api_task = server::start_server(api_config, api_solver);
+		
+		tracing::info!("Starting solver and API server");
+		
+		// Run both tasks concurrently
+		tokio::select! {
+			result = solver_task => {
+				tracing::info!("Solver finished");
+				result?;
 			}
-		} else {
-			// Run only the solver
-			solver.run().await?;
+			result = api_task => {
+				tracing::info!("API server finished");
+				result?;
+			}
 		}
 	} else {
 		// Run only the solver
+		tracing::info!("Starting solver only");
 		solver.run().await?;
 	}
 
