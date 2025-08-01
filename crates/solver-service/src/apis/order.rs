@@ -8,22 +8,11 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, DetailedIntentStatus, GetOrderResponse, OrderResponse, SettlementType,
+	AssetAmount, DetailedIntentStatus, GetOrderError, GetOrderResponse, OrderResponse,
+	SettlementType,
 };
-use thiserror::Error;
 use tracing::info;
 use uuid::Uuid;
-
-/// Errors that can occur during order processing.
-#[derive(Debug, Error)]
-pub enum OrderError {
-	#[error("Order not found: {0}")]
-	NotFound(String),
-	#[error("Invalid order ID format: {0}")]
-	InvalidId(String),
-	#[error("Internal error: {0}")]
-	Internal(String),
-}
 
 /// Handles GET /order/{id} requests.
 ///
@@ -32,7 +21,7 @@ pub enum OrderError {
 pub async fn get_order_by_id(
 	Path(id): Path<String>,
 	_solver: &SolverEngine,
-) -> Result<GetOrderResponse, OrderError> {
+) -> Result<GetOrderResponse, GetOrderError> {
 	info!("Retrieving order with ID: {}", id);
 
 	let order = process_order_request(&id, _solver).await?;
@@ -44,7 +33,7 @@ pub async fn get_order_by_id(
 async fn process_order_request(
 	order_id: &str,
 	solver: &SolverEngine,
-) -> Result<OrderResponse, OrderError> {
+) -> Result<OrderResponse, GetOrderError> {
 	// Validate order ID format
 	validate_order_id(order_id)?;
 
@@ -60,23 +49,23 @@ async fn process_order_request(
 		}
 		Err(solver_storage::StorageError::NotFound) => {
 			// Order not found in storage
-			Err(OrderError::NotFound(format!(
+			Err(GetOrderError::NotFound(format!(
 				"Order not found: {}",
 				order_id
 			)))
 		}
 		Err(e) => {
 			// Other storage error
-			Err(OrderError::Internal(format!("Storage error: {}", e)))
+			Err(GetOrderError::Internal(format!("Storage error: {}", e)))
 		}
 	}
 }
 
 /// Validates the order ID format.
-fn validate_order_id(order_id: &str) -> Result<(), OrderError> {
+fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
 	// Check if it's a valid UUID format
 	if Uuid::parse_str(order_id).is_err() {
-		return Err(OrderError::InvalidId(format!(
+		return Err(GetOrderError::InvalidId(format!(
 			"Order ID must be a valid UUID: {}",
 			order_id
 		)));
@@ -88,7 +77,7 @@ fn validate_order_id(order_id: &str) -> Result<(), OrderError> {
 /// Converts a storage Order to an API OrderResponse.
 async fn convert_order_to_response(
 	order: solver_types::Order,
-) -> Result<OrderResponse, OrderError> {
+) -> Result<OrderResponse, GetOrderError> {
 	// Extract data from the order's JSON data field
 	// This assumes the order.data contains the necessary fields for the API response
 	let input_amount = order

@@ -89,27 +89,3 @@ async fn handle_get_order_by_id(
 		}
 	}
 }
-
-/// Convert OrderError to APIError with appropriate HTTP status codes.
-impl From<crate::apis::order::OrderError> for APIError {
-	fn from(order_error: crate::apis::order::OrderError) -> Self {
-		use crate::apis::order::OrderError;
-
-		match order_error {
-			OrderError::NotFound(id) => APIError::BadRequest {
-				error_type: "ORDER_NOT_FOUND".to_string(),
-				message: format!("Order not found: {}", id),
-				details: Some(serde_json::json!({ "order_id": id })),
-			},
-			OrderError::InvalidId(id) => APIError::BadRequest {
-				error_type: "INVALID_ORDER_ID".to_string(),
-				message: format!("Invalid order ID format: {}", id),
-				details: Some(serde_json::json!({ "provided_id": id })),
-			},
-			OrderError::Internal(msg) => APIError::InternalServerError {
-				error_type: "INTERNAL_ERROR".to_string(),
-				message: format!("An internal error occurred: {}", msg),
-			},
-		}
-	}
-}
