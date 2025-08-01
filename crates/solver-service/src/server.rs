@@ -3,10 +3,15 @@
 //! This module provides a minimal HTTP server infrastructure
 //! for the OIF Solver API.
 
-use axum::{extract::State, response::Json, routing::post, Router};
+use axum::{
+	extract::{Path, State},
+	response::Json,
+	routing::{get, post},
+	Router,
+};
 use solver_config::ApiConfig;
 use solver_core::SolverEngine;
-use solver_types::{APIError, GetQuoteRequest, GetQuoteResponse};
+use solver_types::{APIError, GetOrderResponse, GetQuoteRequest, GetQuoteResponse};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -36,7 +41,7 @@ pub async fn start_server(
 			"/api",
 			Router::new()
 				.route("/quote", post(handle_quote))
-				.route("/order/:id", get(handle_get_order_by_id)),
+				.route("/order/{id}", get(handle_get_order_by_id)),
 		)
 		.layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
 		.with_state(app_state);

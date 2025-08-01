@@ -774,6 +774,11 @@ impl SolverEngine {
 	pub fn config(&self) -> &Config {
 		&self.config
 	}
+
+	/// Returns a reference to the storage service.
+	pub fn storage(&self) -> &Arc<StorageService> {
+		&self.storage
+	}
 }
 
 /// Type alias for storage backend factory function.

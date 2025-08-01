@@ -4,14 +4,14 @@
 //! order retrieval functionality for cross-chain intents. Users can query the
 //! status and details of their submitted orders using the order ID.
 
-use axum::{extract::Path, http::StatusCode, response::Json};
-use serde::{Deserialize, Serialize};
+use axum::extract::Path;
 use solver_core::SolverEngine;
+use solver_storage;
 use solver_types::{
-	AssetAmount, DetailedIntentStatus, ErrorResponse, GetOrderResponse, SettlementType,
+	AssetAmount, DetailedIntentStatus, GetOrderResponse, OrderResponse, SettlementType,
 };
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 /// Errors that can occur during order processing.
@@ -32,44 +32,44 @@ pub enum OrderError {
 pub async fn get_order_by_id(
 	Path(id): Path<String>,
 	_solver: &SolverEngine,
-) -> Result<GetOrderResponse, GetOrderError> {
+) -> Result<GetOrderResponse, OrderError> {
 	info!("Retrieving order with ID: {}", id);
 
-	match process_order_request(&id).await {
-		Ok(order) => Ok(Json(order)),
-		Err(e) => {
-			warn!("Order retrieval failed: {}", e);
-			let (status_code, error_code) = match e {
-				OrderError::NotFound(_) => (StatusCode::NOT_FOUND, "ORDER_NOT_FOUND"),
-				OrderError::InvalidId(_) => (StatusCode::BAD_REQUEST, "INVALID_ORDER_ID"),
-				OrderError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
-			};
+	let order = process_order_request(&id, _solver).await?;
 
-			Err((
-				status_code,
-				Json(ErrorResponse {
-					error: error_code.to_string(),
-					message: e.to_string(),
-					details: None,
-					retry_after: None,
-				}),
-			))
-		}
-	}
+	Ok(GetOrderResponse { order })
 }
 
 /// Processes an order retrieval request.
-async fn process_order_request(order_id: &str) -> Result<GetOrderResponse, OrderError> {
+async fn process_order_request(
+	order_id: &str,
+	solver: &SolverEngine,
+) -> Result<OrderResponse, OrderError> {
 	// Validate order ID format
 	validate_order_id(order_id)?;
 
-	// TODO: In a real implementation, this would:
-	// 1. Query the storage for the order TODO: Implement this
-	// 2. Check solver permissions to access the order
-	// 3. Return the actual order data with current status
-
-	// For demo purposes, return a mock order
-	generate_mock_order(order_id)
+	// Try to retrieve the order from storage
+	match solver
+		.storage()
+		.retrieve::<solver_types::Order>("orders", order_id)
+		.await
+	{
+		Ok(order) => {
+			// Order found in storage, convert to OrderResponse
+			convert_order_to_response(order).await
+		}
+		Err(solver_storage::StorageError::NotFound) => {
+			// Order not found in storage
+			Err(OrderError::NotFound(format!(
+				"Order not found: {}",
+				order_id
+			)))
+		}
+		Err(e) => {
+			// Other storage error
+			Err(OrderError::Internal(format!("Storage error: {}", e)))
+		}
+	}
 }
 
 /// Validates the order ID format.
@@ -85,34 +85,67 @@ fn validate_order_id(order_id: &str) -> Result<(), OrderError> {
 	Ok(())
 }
 
-/// Generates a mock order for demonstration purposes.
-fn generate_mock_order(order_id: &str) -> Result<GetOrderResponse, OrderError> {
-	// In a real implementation, this would query the actual order from storage
-	// For now, we'll create a mock order based on the ID
+/// Converts a storage Order to an API OrderResponse.
+async fn convert_order_to_response(
+	order: solver_types::Order,
+) -> Result<OrderResponse, OrderError> {
+	// Extract data from the order's JSON data field
+	// This assumes the order.data contains the necessary fields for the API response
+	let input_amount = order
+		.data
+		.get("inputAmount")
+		.and_then(|v| serde_json::from_value::<AssetAmount>(v.clone()).ok())
+		.unwrap_or_else(|| AssetAmount {
+			asset: "0x0000000000000000000000000000000000000000".to_string(),
+			amount: alloy_primitives::U256::ZERO,
+		});
 
-	let order = GetOrderResponse {
-		id: order_id.to_string(),
-		status: DetailedIntentStatus::Pending,
-		created_at: chrono::Utc::now().timestamp() as u64,
+	let output_amount = order
+		.data
+		.get("outputAmount")
+		.and_then(|v| serde_json::from_value::<AssetAmount>(v.clone()).ok())
+		.unwrap_or_else(|| AssetAmount {
+			asset: "0x0000000000000000000000000000000000000000".to_string(),
+			amount: alloy_primitives::U256::ZERO,
+		});
+
+	let settlement_type = order
+		.data
+		.get("settlementType")
+		.and_then(|v| serde_json::from_value::<SettlementType>(v.clone()).ok())
+		.unwrap_or(SettlementType::Escrow);
+
+	let settlement_data = order
+		.data
+		.get("settlementData")
+		.cloned()
+		.unwrap_or_else(|| serde_json::json!({}));
+
+	// For now, assume all orders are pending unless we have more status tracking
+	// In a real implementation, you would query additional storage to determine the actual status
+	let status = DetailedIntentStatus::Pending;
+
+	let response = OrderResponse {
+		id: order.id,
+		status,
+		created_at: order.created_at,
 		last_updated: chrono::Utc::now().timestamp() as u64,
-		quote_id: Some(Uuid::new_v4().to_string()),
-		input_amount: AssetAmount {
-			asset: "0xA0b86a33E6441b8Bf22a1F6C4Bc1C6F9B25F1B5E".to_string(),
-			amount: alloy_primitives::U256::from(1000000000000000000u64), // 1 ETH
-		},
-		output_amount: AssetAmount {
-			asset: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
-			amount: alloy_primitives::U256::from(3000000000u64), // 3000 USDT
-		},
-		settlement_type: SettlementType::Escrow,
-		settlement_data: serde_json::json!({
-			"settler": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-			"fillDeadline": chrono::Utc::now().timestamp() + 3600,
-			"recipient": "0x742d35Cc6634C0532925a3b8D42F3D4C38A5F7F1"
-		}),
-		execution_details: None,
-		error_details: None,
+		quote_id: order
+			.data
+			.get("quoteId")
+			.and_then(|v| v.as_str())
+			.map(|s| s.to_string()),
+		input_amount,
+		output_amount,
+		settlement_type,
+		settlement_data,
+		execution_details: order.data.get("executionDetails").cloned(),
+		error_details: order
+			.data
+			.get("errorDetails")
+			.and_then(|v| v.as_str())
+			.map(|s| s.to_string()),
 	};
 
-	Ok(order)
+	Ok(response)
 }

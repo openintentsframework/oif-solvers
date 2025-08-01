@@ -6,6 +6,7 @@
 use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
 /// Asset amount representation using ERC-7930 interoperable address format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetAmount {
@@ -98,6 +99,13 @@ pub struct GetQuoteResponse {
 	pub quotes: Vec<QuoteOption>,
 }
 
+/// Response containing order details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetOrderResponse {
+	/// Order details
+	pub order: crate::order::OrderResponse,
+}
+
 /// API error response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorResponse {
@@ -134,10 +142,7 @@ pub enum APIError {
 		retry_after: Option<u64>,
 	},
 	/// Internal server error (500)
-	InternalServerError {
-		error_type: String,
-		message: String,
-	},
+	InternalServerError { error_type: String, message: String },
 }
 
 impl APIError {
@@ -154,25 +159,40 @@ impl APIError {
 	/// Convert to ErrorResponse for JSON serialization.
 	pub fn to_error_response(&self) -> ErrorResponse {
 		match self {
-			APIError::BadRequest { error_type, message, details } => ErrorResponse {
+			APIError::BadRequest {
+				error_type,
+				message,
+				details,
+			} => ErrorResponse {
 				error: error_type.clone(),
 				message: message.clone(),
 				details: details.clone(),
 				retry_after: None,
 			},
-			APIError::UnprocessableEntity { error_type, message, details } => ErrorResponse {
+			APIError::UnprocessableEntity {
+				error_type,
+				message,
+				details,
+			} => ErrorResponse {
 				error: error_type.clone(),
 				message: message.clone(),
 				details: details.clone(),
 				retry_after: None,
 			},
-			APIError::ServiceUnavailable { error_type, message, retry_after } => ErrorResponse {
+			APIError::ServiceUnavailable {
+				error_type,
+				message,
+				retry_after,
+			} => ErrorResponse {
 				error: error_type.clone(),
 				message: message.clone(),
 				details: None,
 				retry_after: *retry_after,
 			},
-			APIError::InternalServerError { error_type, message } => ErrorResponse {
+			APIError::InternalServerError {
+				error_type,
+				message,
+			} => ErrorResponse {
 				error: error_type.clone(),
 				message: message.clone(),
 				details: None,
@@ -186,9 +206,15 @@ impl fmt::Display for APIError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			APIError::BadRequest { message, .. } => write!(f, "Bad Request: {}", message),
-			APIError::UnprocessableEntity { message, .. } => write!(f, "Unprocessable Entity: {}", message),
-			APIError::ServiceUnavailable { message, .. } => write!(f, "Service Unavailable: {}", message),
-			APIError::InternalServerError { message, .. } => write!(f, "Internal Server Error: {}", message),
+			APIError::UnprocessableEntity { message, .. } => {
+				write!(f, "Unprocessable Entity: {}", message)
+			}
+			APIError::ServiceUnavailable { message, .. } => {
+				write!(f, "Service Unavailable: {}", message)
+			}
+			APIError::InternalServerError { message, .. } => {
+				write!(f, "Internal Server Error: {}", message)
+			}
 		}
 	}
 }
@@ -199,7 +225,7 @@ impl std::error::Error for APIError {}
 impl axum::response::IntoResponse for APIError {
 	fn into_response(self) -> axum::response::Response {
 		use axum::{http::StatusCode, response::Json};
-		
+
 		let status = match self.status_code() {
 			400 => StatusCode::BAD_REQUEST,
 			422 => StatusCode::UNPROCESSABLE_ENTITY,
@@ -207,7 +233,7 @@ impl axum::response::IntoResponse for APIError {
 			500 => StatusCode::INTERNAL_SERVER_ERROR,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		};
-		
+
 		let error_response = self.to_error_response();
 		(status, Json(error_response)).into_response()
 	}
@@ -233,4 +259,3 @@ pub mod u256_serde {
 		U256::from_str_radix(&s, 10).map_err(D::Error::custom)
 	}
 }
-

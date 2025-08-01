@@ -81,7 +81,7 @@ pub struct FillProof {
 
 /// Order response for API endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetOrderResponse {
+pub struct OrderResponse {
 	/// Unique identifier for this order
 	pub id: String,
 	/// Current order status
