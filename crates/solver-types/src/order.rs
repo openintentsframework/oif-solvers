@@ -7,7 +7,7 @@ use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Address, TransactionHash};
+use crate::{Address, AssetAmount, SettlementType, TransactionHash};
 
 /// Represents a validated cross-chain order.
 ///
@@ -77,4 +77,49 @@ pub struct FillProof {
 	pub filled_timestamp: u64,
 	/// Address of the oracle that attested to the fill.
 	pub oracle_address: String,
+}
+
+/// Order response for API endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetOrderResponse {
+	/// Unique identifier for this order
+	pub id: String,
+	/// Current order status
+	pub status: DetailedIntentStatus,
+	/// Timestamp when this order was created
+	#[serde(rename = "createdAt")]
+	pub created_at: u64,
+	/// Timestamp when this order was last updated
+	#[serde(rename = "lastUpdated")]
+	pub last_updated: u64,
+	/// Associated quote ID if available
+	#[serde(rename = "quoteId")]
+	pub quote_id: Option<String>,
+	/// Input asset and amount
+	#[serde(rename = "inputAmount")]
+	pub input_amount: AssetAmount,
+	/// Output asset and amount
+	#[serde(rename = "outputAmount")]
+	pub output_amount: AssetAmount,
+	/// Settlement mechanism type
+	#[serde(rename = "settlementType")]
+	pub settlement_type: SettlementType,
+	/// Settlement-specific data
+	#[serde(rename = "settlementData")]
+	pub settlement_data: serde_json::Value,
+	/// Execution details if available
+	#[serde(rename = "executionDetails")]
+	pub execution_details: Option<serde_json::Value>,
+	/// Error details if failed
+	#[serde(rename = "errorDetails")]
+	pub error_details: Option<String>,
+}
+
+/// Detailed intent status for API endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DetailedIntentStatus {
+	Pending,
+	Executed,
+	Finalized,
+	Failed,
 }
