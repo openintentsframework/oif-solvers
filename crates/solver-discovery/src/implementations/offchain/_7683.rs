@@ -66,6 +66,14 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::CorsLayer;
 
+/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch
+fn current_timestamp() -> u64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|d| d.as_secs())
+		.unwrap_or(0)
+}
+
 // Import the Solidity types for the OIF contracts
 sol! {
 	#[sol(rpc)]
@@ -357,10 +365,7 @@ impl Eip7683OffchainDiscovery {
 		_signature: &Bytes,
 	) -> Result<(), DiscoveryError> {
 		// Check if deadlines are still valid
-		let current_time = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.unwrap()
-			.as_secs() as u32;
+		let current_time = current_timestamp() as u32;
 
 		if order.expires < current_time {
 			return Err(DiscoveryError::ValidationError(
@@ -464,10 +469,7 @@ impl Eip7683OffchainDiscovery {
 			metadata: IntentMetadata {
 				requires_auction: false,
 				exclusive_until: None,
-				discovered_at: std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
-					.unwrap()
-					.as_secs(),
+				discovered_at: current_timestamp(),
 			},
 			data: serde_json::to_value(&order_data).map_err(|e| {
 				DiscoveryError::ParseError(format!("Failed to serialize order data: {}", e))
@@ -525,9 +527,9 @@ impl Eip7683OffchainDiscovery {
 	/// * `settler_address` - Address of the settler contract
 	/// * `shutdown_rx` - Channel to receive shutdown signal
 	///
-	/// # Panics
+	/// # Errors
 	///
-	/// Panics if:
+	/// Returns an error if:
 	/// - The address cannot be parsed
 	/// - The TCP listener cannot bind to the address
 	/// - The server encounters a fatal error
@@ -539,7 +541,7 @@ impl Eip7683OffchainDiscovery {
 		provider: RootProvider<Http<reqwest::Client>>,
 		settler_address: Address,
 		mut shutdown_rx: mpsc::Receiver<()>,
-	) {
+	) -> Result<(), String> {
 		let state = ApiState {
 			intent_sender,
 			auth_token,
@@ -554,11 +556,11 @@ impl Eip7683OffchainDiscovery {
 
 		let addr = format!("{}:{}", api_host, api_port)
 			.parse::<SocketAddr>()
-			.expect("Invalid address");
+			.map_err(|e| format!("Invalid address '{}:{}': {}", api_host, api_port, e))?;
 
 		let listener = tokio::net::TcpListener::bind(addr)
 			.await
-			.expect("Failed to bind address");
+			.map_err(|e| format!("Failed to bind address {}: {}", addr, e))?;
 
 		tracing::info!("EIP-7683 offchain discovery API listening on {}", addr);
 
@@ -568,7 +570,9 @@ impl Eip7683OffchainDiscovery {
 				tracing::info!("Shutting down API server");
 			})
 			.await
-			.expect("Server error");
+			.map_err(|e| format!("Server error: {}", e))?;
+
+		Ok(())
 	}
 }
 
@@ -722,20 +726,29 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 				),
 				Field::new("api_host", FieldType::String),
 				Field::new("rpc_url", FieldType::String).with_validator(|value| {
-					let url = value.as_str().unwrap();
-					if url.starts_with("http://") || url.starts_with("https://") {
-						Ok(())
-					} else {
-						Err("RPC URL must start with http:// or https://".to_string())
+					match value.as_str() {
+						Some(url) => {
+							if url.starts_with("http://") || url.starts_with("https://") {
+								Ok(())
+							} else {
+								Err("RPC URL must start with http:// or https://".to_string())
+							}
+						}
+						None => Err("Expected string value for rpc_url".to_string()),
 					}
 				}),
-				Field::new("settler_address", FieldType::String).with_validator(|value| {
-					let addr = value.as_str().unwrap();
-					if addr.len() != 42 || !addr.starts_with("0x") {
-						return Err("settler_address must be a valid Ethereum address".to_string());
-					}
-					Ok(())
-				}),
+				Field::new("settler_address", FieldType::String).with_validator(
+					|value| match value.as_str() {
+						Some(addr) => {
+							if addr.len() != 42 || !addr.starts_with("0x") {
+								Err("settler_address must be a valid Ethereum address".to_string())
+							} else {
+								Ok(())
+							}
+						}
+						None => Err("Expected string value for settler_address".to_string()),
+					},
+				),
 			],
 			// Optional fields
 			vec![
@@ -779,7 +792,7 @@ impl DiscoveryInterface for Eip7683OffchainDiscovery {
 		let settler_address = self.settler_address;
 
 		tokio::spawn(async move {
-			Self::run_server(
+			if let Err(e) = Self::run_server(
 				api_host,
 				api_port,
 				sender,
@@ -788,7 +801,10 @@ impl DiscoveryInterface for Eip7683OffchainDiscovery {
 				settler_address,
 				shutdown_rx,
 			)
-			.await;
+			.await
+			{
+				tracing::error!("API server error: {}", e);
+			}
 		});
 
 		self.is_running.store(true, Ordering::SeqCst);
@@ -834,12 +850,15 @@ impl DiscoveryInterface for Eip7683OffchainDiscovery {
 /// settler_address = "0x..."    # required
 /// ```
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if:
+/// Returns an error if:
 /// - `rpc_url` is not provided in the configuration
+/// - `settler_address` is not provided in the configuration
 /// - The discovery service cannot be created
-pub fn create_discovery(config: &toml::Value) -> Box<dyn DiscoveryInterface> {
+pub fn create_discovery(
+	config: &toml::Value,
+) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError> {
 	let api_host = config
 		.get("api_host")
 		.and_then(|v| v.as_str())
@@ -859,17 +878,23 @@ pub fn create_discovery(config: &toml::Value) -> Box<dyn DiscoveryInterface> {
 	let rpc_url = config
 		.get("rpc_url")
 		.and_then(|v| v.as_str())
-		.expect("rpc_url is required")
+		.ok_or_else(|| DiscoveryError::ValidationError("rpc_url is required".to_string()))?
 		.to_string();
 
 	let settler_address = config
 		.get("settler_address")
 		.and_then(|v| v.as_str())
-		.expect("settler_address is required")
+		.ok_or_else(|| DiscoveryError::ValidationError("settler_address is required".to_string()))?
 		.to_string();
 
-	Box::new(
+	let discovery =
 		Eip7683OffchainDiscovery::new(api_host, api_port, auth_token, rpc_url, settler_address)
-			.expect("Failed to create offchain discovery service"),
-	)
+			.map_err(|e| {
+				DiscoveryError::Connection(format!(
+					"Failed to create offchain discovery service: {}",
+					e
+				))
+			})?;
+
+	Ok(Box::new(discovery))
 }
