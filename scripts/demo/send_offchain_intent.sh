@@ -88,8 +88,31 @@ build_order_data() {
     
     # Encode StandardOrder (output oracle is zero)
     ZERO_BYTES32="0x0000000000000000000000000000000000000000000000000000000000000000"
-    ORDER_DATA=$(cast abi-encode "f((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))" \
-        "(${USER_ADDR},${NONCE},31337,${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[$ORIGIN_TOKEN_ADDRESS,$AMOUNT]],[($ZERO_BYTES32,$OUTPUT_SETTLER_BYTES32,31338,$DEST_TOKEN_BYTES32,$AMOUNT,$RECIPIENT_BYTES32,0x,0x)])")
+    # ABI type for StandardOrder encoding:
+    # f(
+    #   (
+    #     address user,
+    #     uint256 nonce,
+    #     uint256 originChainId,
+    #     uint32 expiry,
+    #     uint32 fillDeadline,
+    #     address oracle,
+   #     uint256[2][] inputTokens,
+   #     (
+   #       bytes32 outputOracle,
+   #       bytes32 outputSettler,
+   #       uint256 destinationChainId,
+   #       bytes32 destToken,
+   #       uint256 amount,
+   #       bytes32 recipient,
+   #       bytes extra1,
+   #       bytes extra2
+   #     )[] outputs
+   #   )
+   # )
+   STANDARD_ORDER_ABI_TYPE='f((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))'
+   ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" \
+       "(${USER_ADDR},${NONCE},31337,${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[$ORIGIN_TOKEN_ADDRESS,$AMOUNT]],[($ZERO_BYTES32,$OUTPUT_SETTLER_BYTES32,31338,$DEST_TOKEN_BYTES32,$AMOUNT,$RECIPIENT_BYTES32,0x,0x)])")
 }
 
 # Build the order data
