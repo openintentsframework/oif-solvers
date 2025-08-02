@@ -9,29 +9,22 @@ use alloy_primitives::{Address as AlloyAddress, FixedBytes, U256};
 use alloy_sol_types::{sol, SolCall, SolValue};
 use async_trait::async_trait;
 use solver_types::{
-	Address, ConfigSchema, Eip7683OrderData, ExecutionParams, Field, FieldType, FillProof,
-	Intent, Order, Schema, Transaction,
+	Address, ConfigSchema, Eip7683OrderData, ExecutionParams, Field, FieldType, FillProof, Intent,
+	Order, Schema, Transaction,
 };
 
 // Solidity type definitions for EIP-7683 contract interactions.
 sol! {
-	/// OnchainCrossChainOrder for open() call
-	struct OnchainCrossChainOrder {
-		uint32 fillDeadline;
-		bytes32 orderDataType;
-		bytes orderData;
-	}
-
-	/// GaslessCrossChainOrder for openFor() call
-	struct GaslessCrossChainOrder {
-		address originSettler;
+	/// StandardOrder for the OIF contracts (used in openFor)
+	struct StandardOrder {
 		address user;
 		uint256 nonce;
 		uint256 originChainId;
-		uint32 openDeadline;
+		uint32 expires;
 		uint32 fillDeadline;
-		bytes32 orderDataType;
-		bytes orderData;
+		address inputOracle;
+		uint256[2][] inputs;
+		MandateOutput[] outputs;
 	}
 
 	/// MandateOutput structure used in fill operations.
@@ -63,11 +56,12 @@ sol! {
 		MandateOutput[] outputs;
 	}
 
-	/// IInputSettler interface for finalizing orders.
-	interface IInputSettler {
-		function finaliseSelf(OrderStruct order, uint32[] timestamps, bytes32 solver) external;
-		function open(OnchainCrossChainOrder calldata order) external;
-		function openFor(GaslessCrossChainOrder calldata order, bytes calldata signature, bytes calldata originFillerData) external;
+	/// IInputSettlerEscrow interface for the OIF contracts.
+	interface IInputSettlerEscrow {
+		function finalise(OrderStruct order, uint32[] timestamps, bytes32[] solvers, bytes32 destination, bytes call) external;
+		function finaliseWithSignature(OrderStruct order, uint32[] timestamps, bytes32[] solvers, bytes32 destination, bytes call, bytes signature) external;
+		function open(bytes calldata order) external;
+		function openFor(bytes calldata order, address sponsor, bytes calldata signature) external;
 	}
 }
 
@@ -277,45 +271,35 @@ impl OrderInterface for Eip7683OrderImpl {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
 
-		let origin_settler = self.input_settler_address.clone();
-
 		let raw_order_data = order_data.raw_order_data.as_ref().ok_or_else(|| {
 			OrderError::ValidationFailed("Missing raw order data for off-chain order".to_string())
 		})?;
 
-		let order_data_type = order_data.order_data_type.ok_or_else(|| {
-			OrderError::ValidationFailed("Missing order data type for off-chain order".to_string())
+		let sponsor = order_data.sponsor.as_ref().ok_or_else(|| {
+			OrderError::ValidationFailed("Missing sponsor for off-chain order".to_string())
 		})?;
 
 		let signature = order_data.signature.as_ref().ok_or_else(|| {
 			OrderError::ValidationFailed("Missing signature for off-chain order".to_string())
 		})?;
 
-		// Create GaslessCrossChainOrder for openFor
-		let gasless_order = GaslessCrossChainOrder {
-			originSettler: AlloyAddress::from_slice(&origin_settler.0),
-			user: AlloyAddress::from_slice(
-				&hex::decode(order_data.user.trim_start_matches("0x")).map_err(|e| {
-					OrderError::ValidationFailed(format!("Invalid user address: {}", e))
-				})?,
-			),
-			nonce: U256::from(order_data.nonce),
-			originChainId: U256::from(order_data.origin_chain_id),
-			openDeadline: order_data.expires,
-			fillDeadline: order_data.fill_deadline,
-			orderDataType: FixedBytes::<32>::from(order_data_type),
-			orderData: hex::decode(raw_order_data.trim_start_matches("0x"))
+		// For the OIF contracts, we need to use the StandardOrder openFor
+		// The raw_order_data contains the encoded StandardOrder
+		// We just need to pass the order bytes, sponsor, and signature
+		let sponsor_address =
+			AlloyAddress::from_slice(&hex::decode(sponsor.trim_start_matches("0x")).map_err(
+				|e| OrderError::ValidationFailed(format!("Invalid sponsor address: {}", e)),
+			)?);
+
+		// Use the InputSettlerEscrow openFor call
+		let open_for_data = IInputSettlerEscrow::openForCall {
+			order: hex::decode(raw_order_data.trim_start_matches("0x"))
 				.map_err(|e| OrderError::ValidationFailed(format!("Invalid order data: {}", e)))?
 				.into(),
-		};
-
-		// Encode openFor call
-		let open_for_data = IInputSettler::openForCall {
-			order: gasless_order,
+			sponsor: sponsor_address,
 			signature: hex::decode(signature.trim_start_matches("0x"))
 				.map_err(|e| OrderError::ValidationFailed(format!("Invalid signature: {}", e)))?
 				.into(),
-			originFillerData: vec![].into(), // Empty filler data
 		}
 		.abi_encode();
 
@@ -323,7 +307,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(self.input_settler_address.clone()),
 			data: open_for_data,
 			value: U256::ZERO,
-			chain_id: order_data.origin_chain_id,
+			chain_id: order_data.origin_chain_id.to::<u64>(),
 			nonce: None,
 			gas_limit: Some(300_000), // TODO: Determine gas limit here
 			gas_price: None,
@@ -363,21 +347,18 @@ impl OrderInterface for Eip7683OrderImpl {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
 
-		// Check if this is a same-chain order
-		if order_data.origin_chain_id == order_data.destination_chain_id {
-			return Err(OrderError::ValidationFailed(
-				"Same-chain orders are not supported".to_string(),
-			));
-		}
-
-		// Get the output for the destination chain
+		// For multi-output orders, we need to handle each output separately
+		// This implementation fills the first cross-chain output found
+		// TODO: Implement logic to select the most profitable output
 		let output = order_data
 			.outputs
 			.iter()
-			.find(|o| o.chain_id == order_data.destination_chain_id)
+			.find(|o| o.chain_id != order_data.origin_chain_id)
 			.ok_or_else(|| {
-				OrderError::ValidationFailed("No output found for destination chain".to_string())
+				OrderError::ValidationFailed("No cross-chain output found".to_string())
 			})?;
+
+		let destination_chain_id = output.chain_id;
 
 		// Create the MandateOutput struct for the fill operation
 		let mandate_output = MandateOutput {
@@ -387,26 +368,10 @@ impl OrderInterface for Eip7683OrderImpl {
 				bytes32[12..32].copy_from_slice(&self.output_settler_address.0);
 				FixedBytes::<32>::from(bytes32)
 			},
-			chainId: U256::from(output.chain_id),
-			token: {
-				let token_hex = output.token.trim_start_matches("0x");
-				let token_bytes = hex::decode(token_hex).map_err(|e| {
-					OrderError::ValidationFailed(format!("Invalid token address: {}", e))
-				})?;
-				let mut bytes32 = [0u8; 32];
-				bytes32[12..32].copy_from_slice(&token_bytes);
-				FixedBytes::<32>::from(bytes32)
-			},
+			chainId: output.chain_id,
+			token: FixedBytes::<32>::from(output.token),
 			amount: output.amount,
-			recipient: {
-				let recipient_hex = output.recipient.trim_start_matches("0x");
-				let recipient_bytes = hex::decode(recipient_hex).map_err(|e| {
-					OrderError::ValidationFailed(format!("Invalid recipient address: {}", e))
-				})?;
-				let mut bytes32 = [0u8; 32];
-				bytes32[12..32].copy_from_slice(&recipient_bytes);
-				FixedBytes::<32>::from(bytes32)
-			},
+			recipient: FixedBytes::<32>::from(output.recipient),
 			call: vec![].into(),    // Empty for direct transfers
 			context: vec![].into(), // Empty context
 		};
@@ -428,7 +393,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(self.output_settler_address.clone()),
 			data: fill_data,
 			value: U256::ZERO,
-			chain_id: order_data.destination_chain_id,
+			chain_id: destination_chain_id.to::<u64>(),
 			nonce: None,
 			gas_limit: Some(order_data.fill_gas_limit),
 			gas_price: None,
@@ -467,8 +432,12 @@ impl OrderInterface for Eip7683OrderImpl {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
 
-		// Check if this is a same-chain order
-		if order_data.origin_chain_id == order_data.destination_chain_id {
+		// Check if all outputs are on the origin chain (same-chain order)
+		let has_cross_chain = order_data
+			.outputs
+			.iter()
+			.any(|o| o.chain_id != order_data.origin_chain_id);
+		if !has_cross_chain {
 			return Err(OrderError::ValidationFailed(
 				"Same-chain orders are not supported".to_string(),
 			));
@@ -494,8 +463,8 @@ impl OrderInterface for Eip7683OrderImpl {
 			.outputs
 			.iter()
 			.map(|output| {
-				// Convert addresses to bytes32
-				let oracle_bytes32 = FixedBytes::<32>::from([0u8; 32]); // No oracle
+				// Use the oracle value from the original order
+				let oracle_bytes32 = FixedBytes::<32>::from(output.oracle);
 
 				let settler_bytes32 = {
 					let mut bytes32 = [0u8; 32];
@@ -509,27 +478,14 @@ impl OrderInterface for Eip7683OrderImpl {
 					FixedBytes::<32>::from(bytes32)
 				};
 
-				let token_bytes32 = {
-					let token_hex = output.token.trim_start_matches("0x");
-					let token_bytes = hex::decode(token_hex).unwrap_or_else(|_| vec![0; 20]);
-					let mut bytes32 = [0u8; 32];
-					bytes32[12..32].copy_from_slice(&token_bytes);
-					FixedBytes::<32>::from(bytes32)
-				};
+				let token_bytes32 = FixedBytes::<32>::from(output.token);
 
-				let recipient_bytes32 = {
-					let recipient_hex = output.recipient.trim_start_matches("0x");
-					let recipient_bytes =
-						hex::decode(recipient_hex).unwrap_or_else(|_| vec![0; 20]);
-					let mut bytes32 = [0u8; 32];
-					bytes32[12..32].copy_from_slice(&recipient_bytes);
-					FixedBytes::<32>::from(bytes32)
-				};
+				let recipient_bytes32 = FixedBytes::<32>::from(output.recipient);
 
 				MandateOutput {
 					oracle: oracle_bytes32,
 					settler: settler_bytes32,
-					chainId: U256::from(output.chain_id),
+					chainId: output.chain_id,
 					token: token_bytes32,
 					amount: output.amount,
 					recipient: recipient_bytes32,
@@ -542,8 +498,8 @@ impl OrderInterface for Eip7683OrderImpl {
 		// Build the order struct
 		let order_struct = OrderStruct {
 			user: user_address,
-			nonce: U256::from(order_data.nonce),
-			originChainId: U256::from(order_data.origin_chain_id),
+			nonce: order_data.nonce,
+			originChainId: order_data.origin_chain_id,
 			expires: order_data.expires,
 			fillDeadline: order_data.fill_deadline,
 			oracle: oracle_address,
@@ -554,16 +510,26 @@ impl OrderInterface for Eip7683OrderImpl {
 		// Create timestamps array - use timestamp from fill proof
 		let timestamps = vec![fill_proof.filled_timestamp as u32];
 
-		// Create solver bytes32
+		// Create solver bytes32 array (single solver in this case)
 		let mut solver_bytes32 = [0u8; 32];
 		solver_bytes32[12..32].copy_from_slice(&self.solver_address.0);
-		let solver = FixedBytes::<32>::from(solver_bytes32);
+		let solvers = vec![FixedBytes::<32>::from(solver_bytes32)];
 
-		// Encode the finaliseSelf call
-		let call_data = IInputSettler::finaliseSelfCall {
+		// Create destination bytes32 (solver address for self-finalisation)
+		let mut destination_bytes32 = [0u8; 32];
+		destination_bytes32[12..32].copy_from_slice(&self.solver_address.0);
+		let destination = FixedBytes::<32>::from(destination_bytes32);
+
+		// Empty call data for simple finalisation
+		let call = vec![];
+
+		// Encode the finalise call
+		let call_data = IInputSettlerEscrow::finaliseCall {
 			order: order_struct,
 			timestamps,
-			solver,
+			solvers,
+			destination,
+			call: call.into(),
 		}
 		.abi_encode();
 
@@ -571,7 +537,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(self.input_settler_address.clone()),
 			data: call_data,
 			value: U256::ZERO,
-			chain_id: order_data.origin_chain_id,
+			chain_id: order_data.origin_chain_id.to::<u64>(),
 			nonce: None,
 			gas_limit: Some(order_data.settle_gas_limit),
 			gas_price: None,

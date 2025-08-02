@@ -4,52 +4,51 @@
 //! currently supporting on-chain EIP-7683 event monitoring using the Alloy library.
 
 use crate::{DiscoveryError, DiscoveryInterface};
-use alloy_primitives::{Address as AlloyAddress, Log as PrimLog, LogData, U256};
+use alloy_primitives::{Address as AlloyAddress, Log as PrimLog, LogData};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{Filter, Log};
-use alloy_sol_types::{sol, SolEvent};
+use alloy_sol_types::{sol, SolEvent, SolValue};
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	ConfigSchema, Eip7683OrderData, Eip7683Output, Field, FieldType, Intent, IntentMetadata, Schema,
+	standards::eip7683::MandateOutput, ConfigSchema, Eip7683OrderData, Field, FieldType, Intent,
+	IntentMetadata, Schema,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-// Solidity type definitions for EIP-7683 cross-chain order events.
+// Solidity type definitions for the OIF contracts.
 //
 // These types match the on-chain contract ABI for proper event decoding.
 sol! {
-	/// Output specification for cross-chain orders.
-	struct Output {
+	/// MandateOutput specification for cross-chain orders.
+	struct SolMandateOutput {
+		bytes32 oracle;
+		bytes32 settler;
+		uint256 chainId;
 		bytes32 token;
 		uint256 amount;
 		bytes32 recipient;
-		uint256 chainId;
+		bytes call;
+		bytes context;
 	}
 
-	/// Fill instruction for cross-chain execution.
-	struct FillInstruction {
-		uint64 destinationChainId;
-		bytes32 destinationSettler;
-		bytes originData;
-	}
-
-	/// Resolved cross-chain order structure.
-	struct ResolvedCrossChainOrder {
+	/// StandardOrder structure used in the OIF contracts.
+	struct StandardOrder {
 		address user;
+		uint256 nonce;
 		uint256 originChainId;
-		uint32 openDeadline;
+		uint32 expires;
 		uint32 fillDeadline;
-		bytes32 orderId;
-		Output[] maxSpent;
-		Output[] minReceived;
-		FillInstruction[] fillInstructions;
+		address inputOracle;
+		uint256[2][] inputs;
+		SolMandateOutput[] outputs;
 	}
 
-	/// Event emitted when a new cross-chain order is opened.
-	event Open(bytes32 indexed orderId, ResolvedCrossChainOrder order);
+	/// Event emitted when a new order is opened.
+	/// The order parameter contains the encoded StandardOrder.
+	event Open(bytes32 indexed orderId, bytes order);
 }
 
 /// EIP-7683 on-chain discovery implementation.
@@ -127,58 +126,52 @@ impl Eip7683Discovery {
 			DiscoveryError::ParseError(format!("Failed to decode Open event: {}", e))
 		})?;
 
-		let order = &open_event.order;
 		let order_id = open_event.orderId;
+		let order_bytes = &open_event.order;
 
-		// Extract destination chain ID from the first output (assuming single-output for now)
-		let destination_chain_id = if !order.maxSpent.is_empty() {
-			order.maxSpent[0].chainId
-		} else {
+		// Decode the StandardOrder from bytes
+		let order = StandardOrder::abi_decode(order_bytes, true).map_err(|e| {
+			DiscoveryError::ParseError(format!("Failed to decode StandardOrder: {}", e))
+		})?;
+
+		// Validate that order has outputs
+		if order.outputs.is_empty() {
 			return Err(DiscoveryError::ValidationError(
 				"Order must have at least one output".to_string(),
 			));
-		};
+		}
 
 		// Convert to the format expected by the order implementation
 		// The order implementation expects Eip7683OrderData with specific fields
 		let order_data = Eip7683OrderData {
-			user: order.user.to_string(),
-			nonce: 0u64, // For onchain orders, nonce is always 0
-			origin_chain_id: order.originChainId.to::<u64>(),
-			destination_chain_id: destination_chain_id.to::<u64>(),
-			expires: if order.openDeadline == 0 {
-				order.fillDeadline
-			} else {
-				order.openDeadline
-			}, // For onchain orders with openDeadline=0, use fillDeadline
+			user: format!("0x{}", hex::encode(order.user)),
+			nonce: order.nonce,
+			origin_chain_id: order.originChainId,
+			expires: order.expires,
 			fill_deadline: order.fillDeadline,
-			local_oracle: "0x0000000000000000000000000000000000000000".to_string(), // Default to zero address
-			inputs: order
-				.minReceived
-				.iter()
-				.map(|input| {
-					// Create [token, amount] array where token is bytes32 converted to U256
-					// The token is already in bytes32 format, just use it as U256
-					[U256::from_be_bytes(input.token.0), input.amount]
-				})
-				.collect::<Vec<_>>(),
+			input_oracle: format!("0x{}", hex::encode(order.inputOracle)),
+			inputs: order.inputs.clone(),
 			order_id: order_id.0,
 			settle_gas_limit: 200_000u64, // TODO: calculate exactly
 			fill_gas_limit: 200_000u64,   // TODO: calculate exactly
 			outputs: order
-				.maxSpent
+				.outputs
 				.iter()
-				.map(|output| Eip7683Output {
-					token: format!("0x{}", hex::encode(&output.token.0[12..])),
+				.map(|output| MandateOutput {
+					oracle: output.oracle.0,
+					settler: output.settler.0,
+					chain_id: output.chainId,
+					token: output.token.0,
 					amount: output.amount,
-					recipient: format!("0x{}", hex::encode(&output.recipient.0[12..])),
-					chain_id: output.chainId.to::<u64>(),
+					recipient: output.recipient.0,
+					call: output.call.clone().into(),
+					context: output.context.clone().into(),
 				})
 				.collect::<Vec<_>>(),
-			// On-chain orders don't have raw order data or signatures
-			raw_order_data: None,
-			order_data_type: None,
+			// Store the raw order data for reference
+			raw_order_data: Some(format!("0x{}", hex::encode(order_bytes))),
 			signature: None,
+			sponsor: None,
 		};
 
 		Ok(Intent {
