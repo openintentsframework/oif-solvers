@@ -71,7 +71,9 @@ inspect_contracts() {
         
         # Extract errors
         echo -e "${YELLOW}Errors:${NC}"
-        cd /Users/nami/github/openintentsframework/oif-solvers/oif-contracts
+        # Determine contracts directory relative to this script
+        CONTRACTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../oif-solvers/oif-contracts" && pwd)"
+        cd "$CONTRACTS_DIR"
         
         # Try to find the contract file
         local contract_file=""
