@@ -105,20 +105,31 @@ impl Eip7683OrderImpl {
 	/// # Panics
 	///
 	/// Panics if any of the provided addresses are invalid hex strings.
-	pub fn new(output_settler: String, input_settler: String, solver: String) -> Self {
-		Self {
-			output_settler_address: Address(
-				hex::decode(output_settler.trim_start_matches("0x"))
-					.expect("Invalid output settler address"),
-			),
-			input_settler_address: Address(
-				hex::decode(input_settler.trim_start_matches("0x"))
-					.expect("Invalid input settler address"),
-			),
-			solver_address: Address(
-				hex::decode(solver.trim_start_matches("0x")).expect("Invalid solver address"),
-			),
-		}
+	pub fn new(
+		output_settler: String,
+		input_settler: String,
+		solver: String,
+	) -> Result<Self, OrderError> {
+		let output_settler_address = Address(
+			hex::decode(output_settler.trim_start_matches("0x")).map_err(|e| {
+				OrderError::ValidationFailed(format!("Invalid output settler address: {}", e))
+			})?,
+		);
+		let input_settler_address = Address(
+			hex::decode(input_settler.trim_start_matches("0x")).map_err(|e| {
+				OrderError::ValidationFailed(format!("Invalid input settler address: {}", e))
+			})?,
+		);
+		let solver_address =
+			Address(hex::decode(solver.trim_start_matches("0x")).map_err(|e| {
+				OrderError::ValidationFailed(format!("Invalid solver address: {}", e))
+			})?);
+
+		Ok(Self {
+			output_settler_address,
+			input_settler_address,
+			solver_address,
+		})
 	}
 }
 
@@ -142,29 +153,45 @@ impl ConfigSchema for Eip7683OrderSchema {
 			// Required fields
 			vec![
 				Field::new("output_settler_address", FieldType::String).with_validator(|value| {
-					let addr = value.as_str().unwrap();
-					if addr.len() != 42 || !addr.starts_with("0x") {
-						return Err(
-							"output_settler_address must be a valid Ethereum address".to_string()
-						);
+					match value.as_str() {
+						Some(addr) => {
+							if addr.len() != 42 || !addr.starts_with("0x") {
+								return Err(
+									"output_settler_address must be a valid Ethereum address"
+										.to_string(),
+								);
+							}
+							Ok(())
+						}
+						None => Err("Expected string value for output_settler_address".to_string()),
 					}
-					Ok(())
 				}),
 				Field::new("input_settler_address", FieldType::String).with_validator(|value| {
-					let addr = value.as_str().unwrap();
-					if addr.len() != 42 || !addr.starts_with("0x") {
-						return Err(
-							"input_settler_address must be a valid Ethereum address".to_string()
-						);
+					match value.as_str() {
+						Some(addr) => {
+							if addr.len() != 42 || !addr.starts_with("0x") {
+								return Err(
+									"input_settler_address must be a valid Ethereum address"
+										.to_string(),
+								);
+							}
+							Ok(())
+						}
+						None => Err("Expected string value for input_settler_address".to_string()),
 					}
-					Ok(())
 				}),
-				Field::new("solver_address", FieldType::String).with_validator(|value| {
-					let addr = value.as_str().unwrap();
-					if addr.len() != 42 || !addr.starts_with("0x") {
-						return Err("solver_address must be a valid Ethereum address".to_string());
+				Field::new("solver_address", FieldType::String).with_validator(|value| match value
+					.as_str()
+				{
+					Some(addr) => {
+						if addr.len() != 42 || !addr.starts_with("0x") {
+							return Err(
+								"solver_address must be a valid Ethereum address".to_string()
+							);
+						}
+						Ok(())
 					}
-					Ok(())
+					None => Err("Expected string value for solver_address".to_string()),
 				}),
 			],
 			// Optional fields
@@ -216,8 +243,8 @@ impl OrderInterface for Eip7683OrderImpl {
 		// Validate deadlines
 		let now = std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
-			.unwrap()
-			.as_secs() as u32;
+			.map(|d| d.as_secs() as u32)
+			.unwrap_or(0);
 
 		if now > order_data.expires {
 			return Err(OrderError::ValidationFailed("Order expired".to_string()));
@@ -572,25 +599,31 @@ impl OrderInterface for Eip7683OrderImpl {
 /// # Panics
 ///
 /// Panics if any required configuration parameter is missing.
-pub fn create_order_impl(config: &toml::Value) -> Box<dyn OrderInterface> {
+pub fn create_order_impl(config: &toml::Value) -> Result<Box<dyn OrderInterface>, OrderError> {
 	let output_settler = config
 		.get("output_settler_address")
 		.and_then(|v| v.as_str())
-		.expect("output_settler_address is required");
+		.ok_or_else(|| {
+			OrderError::ValidationFailed("output_settler_address is required".to_string())
+		})?;
 
 	let input_settler = config
 		.get("input_settler_address")
 		.and_then(|v| v.as_str())
-		.expect("input_settler_address is required");
+		.ok_or_else(|| {
+			OrderError::ValidationFailed("input_settler_address is required".to_string())
+		})?;
 
 	let solver_address = config
 		.get("solver_address")
 		.and_then(|v| v.as_str())
-		.expect("solver_address is required");
+		.ok_or_else(|| OrderError::ValidationFailed("solver_address is required".to_string()))?;
 
-	Box::new(Eip7683OrderImpl::new(
+	let order_impl = Eip7683OrderImpl::new(
 		output_settler.to_string(),
 		input_settler.to_string(),
 		solver_address.to_string(),
-	))
+	)?;
+
+	Ok(Box::new(order_impl))
 }

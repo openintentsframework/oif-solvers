@@ -18,6 +18,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
+/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch
+fn current_timestamp() -> u64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|d| d.as_secs())
+		.unwrap_or(0)
+}
+
 // Solidity type definitions for the OIF contracts.
 //
 // These types match the on-chain contract ABI for proper event decoding.
@@ -181,10 +189,7 @@ impl Eip7683Discovery {
 			metadata: IntentMetadata {
 				requires_auction: false,
 				exclusive_until: None,
-				discovered_at: std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
-					.unwrap()
-					.as_secs(),
+				discovered_at: current_timestamp(),
 			},
 			data: serde_json::to_value(&order_data).map_err(|e| {
 				DiscoveryError::ParseError(format!("Failed to serialize order data: {}", e))
@@ -274,34 +279,40 @@ impl ConfigSchema for Eip7683DiscoverySchema {
 			// Required fields
 			vec![
 				Field::new("rpc_url", FieldType::String).with_validator(|value| {
-					let url = value.as_str().unwrap();
-					if url.starts_with("http://") || url.starts_with("https://") {
-						Ok(())
-					} else {
-						Err("RPC URL must start with http:// or https://".to_string())
+					match value.as_str() {
+						Some(url) => {
+							if url.starts_with("http://") || url.starts_with("https://") {
+								Ok(())
+							} else {
+								Err("RPC URL must start with http:// or https://".to_string())
+							}
+						}
+						None => Err("Expected string value for rpc_url".to_string()),
 					}
 				}),
 				Field::new(
 					"settler_addresses",
 					FieldType::Array(Box::new(FieldType::String)),
 				)
-				.with_validator(|value| {
-					let array = value.as_array().unwrap();
-					if array.is_empty() {
-						return Err("At least one settler address is required".to_string());
-					}
-					for (i, addr) in array.iter().enumerate() {
-						let addr_str = addr
-							.as_str()
-							.ok_or_else(|| format!("settler_addresses[{}] must be a string", i))?;
-						if addr_str.len() != 42 || !addr_str.starts_with("0x") {
-							return Err(format!(
-								"settler_addresses[{}] must be a valid Ethereum address",
-								i
-							));
+				.with_validator(|value| match value.as_array() {
+					Some(array) => {
+						if array.is_empty() {
+							return Err("At least one settler address is required".to_string());
 						}
+						for (i, addr) in array.iter().enumerate() {
+							let addr_str = addr.as_str().ok_or_else(|| {
+								format!("settler_addresses[{}] must be a string", i)
+							})?;
+							if addr_str.len() != 42 || !addr_str.starts_with("0x") {
+								return Err(format!(
+									"settler_addresses[{}] must be a valid Ethereum address",
+									i
+								));
+							}
+						}
+						Ok(())
 					}
-					Ok(())
+					None => Err("Expected array value for settler_addresses".to_string()),
 				}),
 			],
 			// Optional fields
@@ -376,11 +387,19 @@ impl DiscoveryInterface for Eip7683Discovery {
 /// instance. Required configuration parameters:
 /// - `rpc_url`: The HTTP RPC endpoint URL
 /// - `settler_addresses`: Array of contract addresses to monitor
-pub fn create_discovery(config: &toml::Value) -> Box<dyn DiscoveryInterface> {
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - `rpc_url` is not provided in the configuration
+/// - The discovery service cannot be created (e.g., connection failure)
+pub fn create_discovery(
+	config: &toml::Value,
+) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError> {
 	let rpc_url = config
 		.get("rpc_url")
 		.and_then(|v| v.as_str())
-		.expect("rpc_url is required");
+		.ok_or_else(|| DiscoveryError::ValidationError("rpc_url is required".to_string()))?;
 
 	let settler_addresses = config
 		.get("settler_addresses")
@@ -396,7 +415,7 @@ pub fn create_discovery(config: &toml::Value) -> Box<dyn DiscoveryInterface> {
 	let discovery = tokio::task::block_in_place(|| {
 		tokio::runtime::Handle::current()
 			.block_on(async { Eip7683Discovery::new(rpc_url, settler_addresses).await })
-	});
+	})?;
 
-	Box::new(discovery.expect("Failed to create discovery service"))
+	Ok(Box::new(discovery))
 }

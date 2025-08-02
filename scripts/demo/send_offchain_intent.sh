@@ -32,10 +32,18 @@ ORACLE_ADDRESS=$(grep 'oracle_address = ' config/demo.toml | cut -d'"' -f2)
 ORIGIN_TOKEN_ADDRESS=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'token = ' | cut -d'"' -f2)
 DEST_TOKEN_ADDRESS=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'token = ' | cut -d'"' -f2)
 USER_ADDR=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'user = ' | cut -d'"' -f2)
+USER_PRIVATE_KEY=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'user_private_key = ' | cut -d'"' -f2)
 RECIPIENT_ADDR=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'recipient = ' | cut -d'"' -f2)
 
-# API endpoint
-API_URL="http://localhost:8081/intent"
+# Load RPC URLs and chain IDs from config
+ORIGIN_RPC_URL=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
+DEST_RPC_URL=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
+ORIGIN_CHAIN_ID=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
+DEST_CHAIN_ID=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
+
+# API endpoint - read from config if available
+API_PORT=$(grep -A 10 '\[discovery.sources.offchain_eip7683\]' config/demo.toml | grep 'api_port = ' | awk '{print $3}')
+API_URL="http://localhost:${API_PORT:-8081}/intent"
 
 # Amount in wei (1 token = 1e18 wei)
 AMOUNT="1000000000000000000"
@@ -50,19 +58,17 @@ approve_permit2() {
         "allowance(address,address)" \
         "$USER_ADDR" \
         "$PERMIT2_ADDRESS" \
-        --rpc-url http://localhost:8545)
+        --rpc-url $ORIGIN_RPC_URL)
     
     if [ "$CURRENT_ALLOWANCE" = "0x0000000000000000000000000000000000000000000000000000000000000000" ]; then
         echo -e "${BLUE}   Approving Permit2...${NC}"
-        
-        USER_KEY=$(grep 'user_private_key = ' config/demo.toml | cut -d'"' -f2)
         
         TX_HASH=$(cast send "$ORIGIN_TOKEN_ADDRESS" \
             "approve(address,uint256)" \
             "$PERMIT2_ADDRESS" \
             "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" \
-            --private-key "$USER_KEY" \
-            --rpc-url http://localhost:8545 \
+            --private-key "$USER_PRIVATE_KEY" \
+            --rpc-url $ORIGIN_RPC_URL \
             --json | jq -r '.transactionHash')
         
         echo -e "${GREEN}✅ Permit2 approved${NC}"
@@ -80,6 +86,7 @@ build_order_data() {
     FILL_DEADLINE=$((CURRENT_TIME + 3600))  # 1 hour
     EXPIRY=$FILL_DEADLINE
     NONCE=$CURRENT_TIME
+    
     
     # Convert addresses to bytes32
     OUTPUT_SETTLER_BYTES32="0x000000000000000000000000${OUTPUT_SETTLER_ADDRESS:2}"
@@ -112,7 +119,7 @@ build_order_data() {
    # )
    STANDARD_ORDER_ABI_TYPE='f((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))'
    ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" \
-       "(${USER_ADDR},${NONCE},31337,${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[$ORIGIN_TOKEN_ADDRESS,$AMOUNT]],[($ZERO_BYTES32,$OUTPUT_SETTLER_BYTES32,31338,$DEST_TOKEN_BYTES32,$AMOUNT,$RECIPIENT_BYTES32,0x,0x)])")
+       "(${USER_ADDR},${NONCE},${ORIGIN_CHAIN_ID},${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[$ORIGIN_TOKEN_ADDRESS,$AMOUNT]],[($ZERO_BYTES32,$OUTPUT_SETTLER_BYTES32,${DEST_CHAIN_ID},$DEST_TOKEN_BYTES32,$AMOUNT,$RECIPIENT_BYTES32,0x,0x)])")
 }
 
 # Build the order data
@@ -120,13 +127,12 @@ build_order_data
 
 echo -e "${BLUE}📋 Order Details:${NC}"
 echo -e "   User: $USER_ADDR → Recipient: $RECIPIENT_ADDR"
-echo -e "   Amount: 1.0 TEST (Chain 31337 → 31338)"
+echo -e "   Amount: 1.0 TEST (Chain $ORIGIN_CHAIN_ID → $DEST_CHAIN_ID)"
 echo -e "   Fill Deadline: $(date -r $FILL_DEADLINE 2>/dev/null || date -d @$FILL_DEADLINE)"
 
 echo ""
 echo -e "${YELLOW}🔏 Generating EIP-712 signature...${NC}"
 
-USER_PRIVATE_KEY=$(grep 'user_private_key = ' config/demo.toml | cut -d'"' -f2)
 PERMIT2_NONCE=$NONCE
 
 # Compute EIP-712 type hashes
@@ -148,7 +154,7 @@ PERMIT_BATCH_WITNESS_TYPE_HASH=$(cast keccak "$PERMIT_BATCH_WITNESS_STRING")
 # Domain separator for Permit2
 DOMAIN_TYPE_HASH=$(cast keccak "EIP712Domain(string name,uint256 chainId,address verifyingContract)")
 PERMIT2_NAME_HASH=$(cast keccak "Permit2")
-DOMAIN_SEPARATOR=$(cast abi-encode "f(bytes32,bytes32,uint256,address)" "$DOMAIN_TYPE_HASH" "$PERMIT2_NAME_HASH" "31337" "0x000000000022D473030F116dDEE9F6B43aC78BA3")
+DOMAIN_SEPARATOR=$(cast abi-encode "f(bytes32,bytes32,uint256,address)" "$DOMAIN_TYPE_HASH" "$PERMIT2_NAME_HASH" "$ORIGIN_CHAIN_ID" "0x000000000022D473030F116dDEE9F6B43aC78BA3")
 DOMAIN_SEPARATOR_HASH=$(cast keccak "$DOMAIN_SEPARATOR")
 
 
@@ -156,7 +162,7 @@ DOMAIN_SEPARATOR_HASH=$(cast keccak "$DOMAIN_SEPARATOR")
 compute_mandate_output_hash() {
     local oracle="0x0000000000000000000000000000000000000000000000000000000000000000"  # Zero for outputs
     local settler="$OUTPUT_SETTLER_BYTES32"
-    local chainId="31338"
+    local chainId="$DEST_CHAIN_ID"
     local token="$DEST_TOKEN_BYTES32"
     local amount="$AMOUNT"
     local recipient="$RECIPIENT_BYTES32"
