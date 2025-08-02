@@ -11,8 +11,9 @@ use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_transport_http::Http;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use solver_types::{ConfigSchema, Field, FieldType, FillProof, Order, Schema, TransactionHash};
+use solver_types::{
+	ConfigSchema, Eip7683OrderData, Field, FieldType, FillProof, Order, Schema, TransactionHash,
+};
 
 /// Direct settlement implementation.
 ///
@@ -25,15 +26,6 @@ pub struct DirectSettlement {
 	oracle_address: String,
 	/// Dispute period duration in seconds.
 	dispute_period_seconds: u64,
-}
-
-/// EIP-7683 specific order data used for parsing order information.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Eip7683OrderData {
-	order_id: [u8; 32],
-	user: String,
-	origin_chain_id: u64,
-	destination_chain_id: u64,
 }
 
 impl DirectSettlement {

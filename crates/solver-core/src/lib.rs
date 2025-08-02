@@ -251,8 +251,6 @@ impl SolverEngine {
 			.await
 			.map_err(|e| SolverError::Service(e.to_string()))?
 		{
-			tracing::info!("Preparing order with transaction");
-
 			// Submit prepare transaction
 			let prepare_tx_hash = self
 				.delivery
@@ -528,8 +526,6 @@ impl SolverEngine {
 			}
 		};
 
-		tracing::info!(order_id = %truncate_id(&order_id), "Prepare transaction confirmed");
-
 		// Retrieve pending execution details
 		let pending_data: Option<(Order, ExecutionParams)> = self
 			.storage
@@ -600,7 +596,7 @@ impl SolverEngine {
 					tracing::error!(
 						order_id = %truncate_id(&order_id),
 						error = %e,
-						"Failed to validate fill"
+						"Failed to get attestation for fill transaction"
 					);
 					return;
 				}

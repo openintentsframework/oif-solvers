@@ -9,7 +9,7 @@
 #    - Destination chain (port 8546, chain ID 31338) - Where intents are fulfilled
 #
 # 2. Deploy contracts on both chains:
-#    - Origin: TestToken, Permit2, TheCompact, AlwaysYesOracle, InputSettler7683
+#    - Origin: TestToken, Permit2, TheCompact, AlwaysYesOracle, InputSettlerEscrow
 #    - Destination: TestToken, Permit2, OutputSettler7683
 #
 # 3. Setup initial state:
@@ -68,7 +68,12 @@ check_port() {
     if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo -e "${YELLOW}Port $1 is in use. Killing existing process...${NC}"
         kill -9 $(lsof -t -i:$1) 2>/dev/null || true
-        sleep 2
+        sleep 3
+        # Double-check the port is free
+        if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo -e "${YELLOW}Port $1 still in use. Waiting longer...${NC}"
+            sleep 2
+        fi
     fi
 }
 
@@ -120,6 +125,25 @@ start_anvil_chain() {
 start_anvil() {
     start_anvil_chain "Origin" $ORIGIN_CHAIN_ID $ORIGIN_PORT
     start_anvil_chain "Destination" $DEST_CHAIN_ID $DEST_PORT
+    
+    # Give both chains a moment to fully initialize
+    echo -e "${YELLOW}⏳ Waiting for chains to fully initialize...${NC}"
+    sleep 3
+    
+    # Verify both chains are really ready by making a test call
+    for i in {1..5}; do
+        if curl -s -X POST -H "Content-Type: application/json" \
+            --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            $ORIGIN_RPC_URL > /dev/null && \
+           curl -s -X POST -H "Content-Type: application/json" \
+            --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            $DEST_RPC_URL > /dev/null; then
+            echo -e "${GREEN}✅ Both chains are ready${NC}"
+            break
+        fi
+        echo -e "${YELLOW}⏳ Waiting for chains to stabilize... (attempt $i/5)${NC}"
+        sleep 2
+    done
 }
 
 # Function to deploy a token contract
@@ -232,6 +256,9 @@ deploy_contracts() {
     
     cd oif-contracts
     
+    # Ensure we have a clean build environment
+    rm -rf cache out 2>/dev/null || true
+    
     # Create TestToken contract
     cat > /tmp/TestToken.sol << 'EOF'
 // SPDX-License-Identifier: MIT
@@ -330,19 +357,19 @@ EOF
     echo -e "${GREEN}✅ AlwaysYesOracle deployed on Origin: $ORACLE_ADDRESS${NC}"
 
     # Deploy InputSettler on Origin chain
-    echo -e "${BLUE}⚖️ Deploying InputSettler7683 on Origin chain...${NC}"
-    INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/7683/InputSettler7683.sol:InputSettler7683 \
+    echo -e "${BLUE}⚖️ Deploying InputSettlerEscrow on Origin chain...${NC}"
+    INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
         --rpc-url $ORIGIN_RPC_URL \
         --private-key $PRIVATE_KEY \
         --broadcast 2>&1)
     
     INPUT_SETTLER_ADDRESS=$(echo "$INPUT_SETTLER_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
     if [ -z "$INPUT_SETTLER_ADDRESS" ]; then
-        echo -e "${RED}❌ Failed to deploy InputSettler7683 on Origin${NC}"
+        echo -e "${RED}❌ Failed to deploy InputSettlerEscrow on Origin${NC}"
         echo "$INPUT_SETTLER_OUTPUT"
         exit 1
     fi
-    echo -e "${GREEN}✅ InputSettler7683 deployed on Origin: $INPUT_SETTLER_ADDRESS${NC}"
+    echo -e "${GREEN}✅ InputSettlerEscrow deployed on Origin: $INPUT_SETTLER_ADDRESS${NC}"
 
     echo -e "${YELLOW}=== DESTINATION CHAIN DEPLOYMENT ====${NC}"
     
@@ -360,7 +387,7 @@ EOF
 
     # Deploy OutputSettler on Destination chain
     echo -e "${BLUE}⚖️ Deploying OutputSettler7683 on Destination chain...${NC}"
-    OUTPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/output/coin/OutputSettler7683.sol:OutputInputSettler7683 \
+    OUTPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/output/coin/OutputSettler7683.sol:OutputInputSettlerEscrow \
         --rpc-url $DEST_RPC_URL \
         --private-key $PRIVATE_KEY \
         --broadcast 2>&1)
@@ -490,6 +517,7 @@ settler_addresses = ["$INPUT_SETTLER_ADDRESS"]
 api_host = "0.0.0.0"
 api_port = 8081
 rpc_url = "http://localhost:8545"
+settler_address = "$INPUT_SETTLER_ADDRESS"
 # auth_token = "your-secret-token"
 
 [order]
@@ -508,6 +536,14 @@ max_gas_price_gwei = 100
 rpc_url = "$DEST_RPC_URL"
 oracle_address = "$ORACLE_ADDRESS"
 dispute_period_seconds = 1
+
+# API server configuration
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 3000
+timeout_seconds = 30
+max_request_size = 1048576  # 1MB
 
 # ============================================================================
 # DEMO SCRIPT CONFIGURATION
@@ -564,7 +600,7 @@ show_summary() {
     echo ""
     echo -e "${BLUE}📋 Origin Chain Contracts:${NC}"
     echo -e "   TestToken:         $ORIGIN_TOKEN_ADDRESS"
-    echo -e "   InputSettler7683:  $INPUT_SETTLER_ADDRESS"
+    echo -e "   InputSettlerEscrow:$INPUT_SETTLER_ADDRESS"
     echo -e "   The Compact:       $ORIGIN_COMPACT_ADDRESS"
     echo -e "   Permit2:           $ORIGIN_PERMIT2_ADDRESS"
     echo -e "   AlwaysYesOracle:   $ORACLE_ADDRESS"
@@ -615,6 +651,9 @@ cleanup() {
     pkill -f "anvil.*--port.*$DEST_PORT" || true
     pkill -f anvil || true
     
+    # Clean up log files
+    rm -f Origin_anvil.log Destination_anvil.log 2>/dev/null || true
+    
     echo -e "${GREEN}✅ Cleanup complete${NC}"
 }
 
@@ -631,6 +670,17 @@ fi
 # Main execution
 case "${1:-setup}" in
     "setup")
+        # Clean up any existing processes first
+        echo -e "${YELLOW}🧹 Cleaning up any existing Anvil processes...${NC}"
+        pkill -f "anvil.*--port.*$ORIGIN_PORT" 2>/dev/null || true
+        pkill -f "anvil.*--port.*$DEST_PORT" 2>/dev/null || true
+        rm -f Origin_anvil.pid Destination_anvil.pid 2>/dev/null || true
+        rm -f Origin_anvil.log Destination_anvil.log 2>/dev/null || true
+        
+        # Extra cleanup for any stale anvil processes
+        pkill -9 anvil 2>/dev/null || true
+        sleep 3
+        
         start_anvil
         deploy_contracts
         setup_tokens

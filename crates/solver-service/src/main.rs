@@ -16,8 +16,8 @@ mod server;
 // Import implementations from individual crates
 use solver_account::implementations::local::create_account;
 use solver_delivery::implementations::evm::alloy::create_http_delivery;
-use solver_discovery::implementations::offchain::_7683::create_discovery as offchain_create_discovery;
-// use solver_discovery::implementations::onchain::_7683::create_discovery as onchain_create_discovery;
+// use solver_discovery::implementations::offchain::_7683::create_discovery as offchain_create_discovery;
+use solver_discovery::implementations::onchain::_7683::create_discovery as onchain_create_discovery;
 use solver_order::implementations::{
 	standards::_7683::create_order_impl, strategies::simple::create_strategy,
 };
@@ -76,18 +76,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tracing::info!("Loaded solver engine");
 
 	// Check if API server should be started
-	let api_enabled = config.api.as_ref().map_or(false, |api| api.enabled);
-	
+	let api_enabled = config.api.as_ref().is_some_and(|api| api.enabled);
+
 	if api_enabled {
 		let api_config = config.api.as_ref().unwrap().clone();
 		let api_solver = Arc::clone(&solver);
-		
+
 		// Start both the solver and the API server concurrently
 		let solver_task = solver.run();
 		let api_task = server::start_server(api_config, api_solver);
-		
+
 		tracing::info!("Starting solver and API server");
-		
+
 		// Run both tasks concurrently
 		tokio::select! {
 			result = solver_task => {
@@ -129,9 +129,9 @@ fn build_solver(config: Config) -> Result<SolverEngine, Box<dyn std::error::Erro
         .with_delivery_factory("origin", create_http_delivery)
         .with_delivery_factory("destination", create_http_delivery)
         // Discovery implementations
-        // .with_discovery_factory("onchain_eip7683", onchain_create_discovery)
+        .with_discovery_factory("onchain_eip7683", onchain_create_discovery)
 		// Discovery implementations
-		.with_discovery_factory("offchain_eip7683", offchain_create_discovery)
+		// .with_discovery_factory("offchain_eip7683", offchain_create_discovery)
         // Order implementations
         .with_order_factory("eip7683", create_order_impl)
         // Settlement implementations
