@@ -180,6 +180,7 @@ async fn convert_eip7683_order_to_response(
 	};
 
 	// For EIP-7683, we can infer settlement type (default to Escrow for now)
+	// TODO: Handle other settlement types
 	let settlement_type = SettlementType::Escrow;
 
 	// Create settlement data from the raw order data
@@ -215,17 +216,12 @@ async fn convert_eip7683_order_to_response(
 		status,
 		created_at: order.created_at,
 		last_updated: chrono::Utc::now().timestamp() as u64,
-		quote_id: None, // EIP-7683 orders don't have quote IDs by default
+		quote_id: None, // TODO: Retrieve quote ID from storage (or from other source?)
 		input_amount,
 		output_amount,
 		settlement_type,
 		settlement_data,
 		fill_transaction,
-		error_details: order
-			.data
-			.get("errorDetails")
-			.and_then(|v| v.as_str())
-			.map(|s| s.to_string()),
 	};
 
 	Ok(response)
@@ -276,14 +272,8 @@ async fn derive_order_status_from_events(
 		return Ok(OrderStatus::Pending);
 	}
 
-	// Check for explicit failure indicators
-	if order.data.get("errorDetails").is_some() {
-		return Ok(OrderStatus::Failed);
-	}
-
 	// Fall back to checking stored status in order data
 	if let Some(stored_status) = order.data.get("status") {
-		println!("Stored status: {:?}", stored_status);
 		if let Ok(status) = serde_json::from_value::<OrderStatus>(stored_status.clone()) {
 			return Ok(status);
 		}

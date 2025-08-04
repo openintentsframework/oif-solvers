@@ -110,9 +110,6 @@ pub struct OrderResponse {
 	/// Transaction details if order has been executed
 	#[serde(rename = "fillTransaction")]
 	pub fill_transaction: Option<serde_json::Value>,
-	/// Error details if failed
-	#[serde(rename = "errorDetails")]
-	pub error_details: Option<String>,
 }
 
 /// Status of an order in the solver system.
