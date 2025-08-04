@@ -85,7 +85,7 @@ pub struct OrderResponse {
 	/// Unique identifier for this order
 	pub id: String,
 	/// Current order status
-	pub status: DetailedIntentStatus,
+	pub status: OrderStatus,
 	/// Timestamp when this order was created
 	#[serde(rename = "createdAt")]
 	pub created_at: u64,
@@ -107,17 +107,17 @@ pub struct OrderResponse {
 	/// Settlement-specific data
 	#[serde(rename = "settlementData")]
 	pub settlement_data: serde_json::Value,
-	/// Execution details if available
-	#[serde(rename = "executionDetails")]
-	pub execution_details: Option<serde_json::Value>,
+	/// Transaction details if order has been executed
+	#[serde(rename = "transaction")]
+	pub transaction: Option<serde_json::Value>,
 	/// Error details if failed
 	#[serde(rename = "errorDetails")]
 	pub error_details: Option<String>,
 }
 
-/// Detailed intent status for API endpoints.
+/// Status of an order in the solver system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DetailedIntentStatus {
+pub enum OrderStatus {
 	Pending,
 	Executed,
 	Finalized,

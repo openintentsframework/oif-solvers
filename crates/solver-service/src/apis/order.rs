@@ -8,8 +8,7 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, DetailedIntentStatus, GetOrderError, GetOrderResponse, OrderResponse,
-	SettlementType,
+	AssetAmount, GetOrderError, GetOrderResponse, OrderResponse, OrderStatus, SettlementType,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -79,30 +78,25 @@ async fn convert_order_to_response(
 	order: solver_types::Order,
 ) -> Result<OrderResponse, GetOrderError> {
 	// Extract data from the order's JSON data field
-	// This assumes the order.data contains the necessary fields for the API response
-	let input_amount = order
-		.data
-		.get("inputAmount")
-		.and_then(|v| serde_json::from_value::<AssetAmount>(v.clone()).ok())
-		.unwrap_or_else(|| AssetAmount {
-			asset: "0x0000000000000000000000000000000000000000".to_string(),
-			amount: alloy_primitives::U256::ZERO,
-		});
+	// Return errors instead of defaulting to placeholder values
 
-	let output_amount = order
-		.data
-		.get("outputAmount")
-		.and_then(|v| serde_json::from_value::<AssetAmount>(v.clone()).ok())
-		.unwrap_or_else(|| AssetAmount {
-			asset: "0x0000000000000000000000000000000000000000".to_string(),
-			amount: alloy_primitives::U256::ZERO,
-		});
+	let input_amount = order.data.get("inputAmount").ok_or_else(|| {
+		GetOrderError::Internal("Missing inputAmount field in order data".to_string())
+	})?;
+	let input_amount = serde_json::from_value::<AssetAmount>(input_amount.clone())
+		.map_err(|e| GetOrderError::Internal(format!("Invalid inputAmount format: {}", e)))?;
 
-	let settlement_type = order
-		.data
-		.get("settlementType")
-		.and_then(|v| serde_json::from_value::<SettlementType>(v.clone()).ok())
-		.unwrap_or(SettlementType::Escrow);
+	let output_amount = order.data.get("outputAmount").ok_or_else(|| {
+		GetOrderError::Internal("Missing outputAmount field in order data".to_string())
+	})?;
+	let output_amount = serde_json::from_value::<AssetAmount>(output_amount.clone())
+		.map_err(|e| GetOrderError::Internal(format!("Invalid outputAmount format: {}", e)))?;
+
+	let settlement_type = order.data.get("settlementType").ok_or_else(|| {
+		GetOrderError::Internal("Missing settlementType field in order data".to_string())
+	})?;
+	let settlement_type = serde_json::from_value::<SettlementType>(settlement_type.clone())
+		.map_err(|e| GetOrderError::Internal(format!("Invalid settlementType format: {}", e)))?;
 
 	let settlement_data = order
 		.data
@@ -110,9 +104,13 @@ async fn convert_order_to_response(
 		.cloned()
 		.unwrap_or_else(|| serde_json::json!({}));
 
-	// For now, assume all orders are pending unless we have more status tracking
-	// In a real implementation, you would query additional storage to determine the actual status
-	let status = DetailedIntentStatus::Pending;
+	let status = order
+		.data
+		.get("status")
+		.and_then(|v| serde_json::from_value::<OrderStatus>(v.clone()).ok())
+		.ok_or_else(|| {
+			GetOrderError::Internal("Missing or invalid status field in order data".to_string())
+		})?;
 
 	let response = OrderResponse {
 		id: order.id,
@@ -128,7 +126,7 @@ async fn convert_order_to_response(
 		output_amount,
 		settlement_type,
 		settlement_data,
-		execution_details: order.data.get("executionDetails").cloned(),
+		transaction: order.data.get("transaction").cloned(),
 		error_details: order
 			.data
 			.get("errorDetails")
