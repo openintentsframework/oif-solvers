@@ -44,7 +44,7 @@ async fn process_order_request(
 	{
 		Ok(order) => {
 			// Order found in storage, convert to OrderResponse
-			convert_order_to_response(order).await
+			convert_order_to_response(order, solver).await
 		}
 		Err(solver_storage::StorageError::NotFound) => {
 			// Order not found in storage
@@ -62,12 +62,11 @@ async fn process_order_request(
 
 /// Validates the order ID format.
 fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
-	// Check if it's a valid UUID format
-	if Uuid::parse_str(order_id).is_err() {
-		return Err(GetOrderError::InvalidId(format!(
-			"Order ID must be a valid UUID: {}",
-			order_id
-		)));
+	// Remove UUID validation - accept any non-empty string as order ID
+	if order_id.is_empty() {
+		return Err(GetOrderError::InvalidId(
+			"Order ID cannot be empty".to_string(),
+		));
 	}
 
 	Ok(())
@@ -76,57 +75,154 @@ fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
 /// Converts a storage Order to an API OrderResponse.
 async fn convert_order_to_response(
 	order: solver_types::Order,
+	solver: &SolverEngine,
 ) -> Result<OrderResponse, GetOrderError> {
-	// Extract data from the order's JSON data field
-	// Return errors instead of defaulting to placeholder values
+	// Handle EIP-7683 order format
+	if order.standard == "eip7683" {
+		convert_eip7683_order_to_response(order, solver).await
+	} else {
+		// Handle other standards or legacy format
+		// TODO: Handle other standards or legacy format
+		Err(GetOrderError::Internal(
+			"Unsupported order standard".to_string(),
+		))
+	}
+}
 
-	let input_amount = order.data.get("inputAmount").ok_or_else(|| {
-		GetOrderError::Internal("Missing inputAmount field in order data".to_string())
+/// Converts an EIP-7683 order to API OrderResponse format.
+async fn convert_eip7683_order_to_response(
+	order: solver_types::Order,
+	solver: &SolverEngine,
+) -> Result<OrderResponse, GetOrderError> {
+	// Extract input amount from EIP-7683 "inputs" field
+	let inputs = order.data.get("inputs").ok_or_else(|| {
+		GetOrderError::Internal("Missing inputs field in EIP-7683 order data".to_string())
 	})?;
-	let input_amount = serde_json::from_value::<AssetAmount>(input_amount.clone())
-		.map_err(|e| GetOrderError::Internal(format!("Invalid inputAmount format: {}", e)))?;
 
-	let output_amount = order.data.get("outputAmount").ok_or_else(|| {
-		GetOrderError::Internal("Missing outputAmount field in order data".to_string())
+	let inputs_array = inputs.as_array().ok_or_else(|| {
+		GetOrderError::Internal("Invalid inputs format - expected array".to_string())
 	})?;
-	let output_amount = serde_json::from_value::<AssetAmount>(output_amount.clone())
-		.map_err(|e| GetOrderError::Internal(format!("Invalid outputAmount format: {}", e)))?;
 
-	let settlement_type = order.data.get("settlementType").ok_or_else(|| {
-		GetOrderError::Internal("Missing settlementType field in order data".to_string())
+	// For now, take the first input (TODO: handle multiple inputs properly)
+	let first_input = inputs_array
+		.first()
+		.ok_or_else(|| GetOrderError::Internal("No inputs found in order".to_string()))?;
+
+	let input_array = first_input.as_array().ok_or_else(|| {
+		GetOrderError::Internal("Invalid input format - expected [token, amount] array".to_string())
 	})?;
-	let settlement_type = serde_json::from_value::<SettlementType>(settlement_type.clone())
-		.map_err(|e| GetOrderError::Internal(format!("Invalid settlementType format: {}", e)))?;
 
-	let settlement_data = order
-		.data
-		.get("settlementData")
-		.cloned()
-		.unwrap_or_else(|| serde_json::json!({}));
+	if input_array.len() != 2 {
+		return Err(GetOrderError::Internal(
+			"Invalid input format - expected [token, amount]".to_string(),
+		));
+	}
 
-	let status = order
-		.data
-		.get("status")
-		.and_then(|v| serde_json::from_value::<OrderStatus>(v.clone()).ok())
+	let input_token = input_array[0]
+		.as_str()
+		.ok_or_else(|| GetOrderError::Internal("Invalid input token format".to_string()))?;
+
+	let input_amount_str = input_array[1]
+		.as_str()
+		.ok_or_else(|| GetOrderError::Internal("Invalid input amount format".to_string()))?;
+
+	let input_amount_u256 = input_amount_str
+		.parse::<alloy_primitives::U256>()
+		.map_err(|e| GetOrderError::Internal(format!("Invalid input amount: {}", e)))?;
+
+	let input_amount = AssetAmount {
+		asset: input_token.to_string(),
+		amount: input_amount_u256,
+	};
+
+	// Extract output amount from EIP-7683 "outputs" field
+	let outputs = order.data.get("outputs").ok_or_else(|| {
+		GetOrderError::Internal("Missing outputs field in EIP-7683 order data".to_string())
+	})?;
+
+	let outputs_array = outputs.as_array().ok_or_else(|| {
+		GetOrderError::Internal("Invalid outputs format - expected array".to_string())
+	})?;
+
+	// For now, take the first output (TODO: handle multiple outputs properly)
+	let first_output = outputs_array
+		.first()
+		.ok_or_else(|| GetOrderError::Internal("No outputs found in order".to_string()))?;
+
+	let output_token_bytes = first_output
+		.get("token")
+		.ok_or_else(|| GetOrderError::Internal("Missing token field in output".to_string()))?;
+
+	// Convert token bytes array to address
+	let token_array = output_token_bytes.as_array().ok_or_else(|| {
+		GetOrderError::Internal("Invalid token format - expected bytes array".to_string())
+	})?;
+
+	// Extract last 20 bytes (address part) from the 32-byte token field
+	let mut token_bytes = [0u8; 20];
+	for (i, byte_val) in token_array.iter().skip(12).take(20).enumerate() {
+		token_bytes[i] = byte_val.as_u64().unwrap_or(0) as u8;
+	}
+	let output_token = format!("0x{}", alloy_primitives::hex::encode(token_bytes));
+
+	let output_amount_str = first_output
+		.get("amount")
+		.and_then(|v| v.as_str())
 		.ok_or_else(|| {
-			GetOrderError::Internal("Missing or invalid status field in order data".to_string())
+			GetOrderError::Internal("Missing or invalid amount field in output".to_string())
 		})?;
+
+	let output_amount_u256 = output_amount_str
+		.parse::<alloy_primitives::U256>()
+		.map_err(|e| GetOrderError::Internal(format!("Invalid output amount: {}", e)))?;
+
+	let output_amount = AssetAmount {
+		asset: output_token,
+		amount: output_amount_u256,
+	};
+
+	// For EIP-7683, we can infer settlement type (default to Escrow for now)
+	let settlement_type = SettlementType::Escrow;
+
+	// Create settlement data from the raw order data
+	let settlement_data = serde_json::json!({
+		"raw_order_data": order.data.get("raw_order_data").cloned().unwrap_or_else(|| serde_json::json!(null)),
+		"signature": order.data.get("signature").cloned().unwrap_or_else(|| serde_json::json!(null)),
+		"nonce": order.data.get("nonce").cloned().unwrap_or_else(|| serde_json::json!(null)),
+		"expires": order.data.get("expires").cloned().unwrap_or_else(|| serde_json::json!(null))
+	});
+
+	// Derive status from SolverEvent state stored in the system
+	let status = derive_order_status_from_events(&order, solver).await?;
+
+	// Try to retrieve fill transaction hash from storage
+	let fill_transaction = if let Ok(fill_tx_hash) = solver
+		.storage()
+		.retrieve::<solver_types::TransactionHash>("fills", &order.id)
+		.await
+	{
+		// Create a structured fill transaction object
+		Some(serde_json::json!({
+			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
+			"status": "confirmed", // or derive from actual status
+			"timestamp": chrono::Utc::now().timestamp() // you might want to store actual timestamp
+		}))
+	} else {
+		// Fall back to existing data in order.data if available
+		order.data.get("fillTransaction").cloned()
+	};
 
 	let response = OrderResponse {
 		id: order.id,
 		status,
 		created_at: order.created_at,
 		last_updated: chrono::Utc::now().timestamp() as u64,
-		quote_id: order
-			.data
-			.get("quoteId")
-			.and_then(|v| v.as_str())
-			.map(|s| s.to_string()),
+		quote_id: None, // EIP-7683 orders don't have quote IDs by default
 		input_amount,
 		output_amount,
 		settlement_type,
 		settlement_data,
-		transaction: order.data.get("transaction").cloned(),
+		fill_transaction,
 		error_details: order
 			.data
 			.get("errorDetails")
@@ -135,4 +231,66 @@ async fn convert_order_to_response(
 	};
 
 	Ok(response)
+}
+
+/// Derives OrderStatus from the current state of the order in the event-driven system.
+async fn derive_order_status_from_events(
+	order: &solver_types::Order,
+	solver: &SolverEngine,
+) -> Result<OrderStatus, GetOrderError> {
+	let order_id = &order.id;
+
+	// Check if order has been completed (claim transaction confirmed)
+	if let Ok(_completion_time) = solver
+		.storage()
+		.retrieve::<u64>("completed_orders", order_id)
+		.await
+	{
+		return Ok(OrderStatus::Finalized);
+	}
+
+	// Also check for completion status in order data (updated by core solver)
+	if let Some(status) = order.data.get("status") {
+		if status.as_str() == Some("Finalized") {
+			return Ok(OrderStatus::Finalized);
+		}
+	}
+
+	// Check if the order has a fill transaction (indicates execution started)
+	if let Ok(_fill_tx_hash) = solver
+		.storage()
+		.retrieve::<solver_types::TransactionHash>("fills", order_id)
+		.await
+	{
+		// Order has been executed (fill transaction submitted) but not yet finalized
+		return Ok(OrderStatus::Executed);
+	}
+
+	// Check if order has pending execution
+	if let Ok(_) = solver
+		.storage()
+		.retrieve::<(solver_types::Order, solver_types::ExecutionParams)>(
+			"pending_execution",
+			order_id,
+		)
+		.await
+	{
+		return Ok(OrderStatus::Pending);
+	}
+
+	// Check for explicit failure indicators
+	if order.data.get("errorDetails").is_some() {
+		return Ok(OrderStatus::Failed);
+	}
+
+	// Fall back to checking stored status in order data
+	if let Some(stored_status) = order.data.get("status") {
+		println!("Stored status: {:?}", stored_status);
+		if let Ok(status) = serde_json::from_value::<OrderStatus>(stored_status.clone()) {
+			return Ok(status);
+		}
+	}
+
+	// Default to Pending
+	Ok(OrderStatus::Pending)
 }

@@ -669,6 +669,50 @@ impl SolverEngine {
 			}
 		};
 
+		// Store completion status in storage
+		self.storage
+			.store(
+				"completed_orders",
+				&order_id,
+				&std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap()
+					.as_secs(),
+			)
+			.await
+			.map_err(|e| SolverError::Service(e.to_string()))?;
+
+		// Store claim transaction hash for this order
+		self.storage
+			.store("claims", &order_id, &tx_hash)
+			.await
+			.map_err(|e| SolverError::Service(e.to_string()))?;
+
+		// Update the order data with completion status
+		if let Ok(mut order) = self.storage.retrieve::<Order>("orders", &order_id).await {
+			// Add completion fields to the order data
+			if let Some(obj) = order.data.as_object_mut() {
+				obj.insert("status".to_string(), serde_json::json!("Finalized"));
+				obj.insert(
+					"completed_at".to_string(),
+					serde_json::json!(std::time::SystemTime::now()
+						.duration_since(std::time::UNIX_EPOCH)
+						.unwrap()
+						.as_secs()),
+				);
+				obj.insert(
+					"claim_tx_hash".to_string(),
+					serde_json::json!(hex::encode(&tx_hash.0)),
+				);
+			}
+
+			// Store the updated order
+			self.storage
+				.store("orders", &order_id, &order)
+				.await
+				.map_err(|e| SolverError::Service(e.to_string()))?;
+		}
+
 		// Emit completed event
 		tracing::info!(
 			order_id = %truncate_id(&order_id),

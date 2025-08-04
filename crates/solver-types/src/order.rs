@@ -108,8 +108,8 @@ pub struct OrderResponse {
 	#[serde(rename = "settlementData")]
 	pub settlement_data: serde_json::Value,
 	/// Transaction details if order has been executed
-	#[serde(rename = "transaction")]
-	pub transaction: Option<serde_json::Value>,
+	#[serde(rename = "fillTransaction")]
+	pub fill_transaction: Option<serde_json::Value>,
 	/// Error details if failed
 	#[serde(rename = "errorDetails")]
 	pub error_details: Option<String>,
