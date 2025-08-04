@@ -11,7 +11,6 @@ use solver_types::{
 	AssetAmount, GetOrderError, GetOrderResponse, OrderResponse, OrderStatus, SettlementType,
 };
 use tracing::info;
-use uuid::Uuid;
 
 /// Handles GET /order/{id} requests.
 ///
@@ -81,8 +80,7 @@ async fn convert_order_to_response(
 	if order.standard == "eip7683" {
 		convert_eip7683_order_to_response(order, solver).await
 	} else {
-		// Handle other standards or legacy format
-		// TODO: Handle other standards or legacy format
+		// Handle other standards
 		Err(GetOrderError::Internal(
 			"Unsupported order standard".to_string(),
 		))
