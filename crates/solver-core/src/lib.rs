@@ -690,13 +690,12 @@ impl SolverEngine {
 			order_id = %truncate_id(&order_id),
 			"Completed"
 		);
-		self.event_bus
-			.publish(SolverEvent::Settlement(SettlementEvent::Completed {
-				order_id: order_id.clone(),
-			}))
-			.ok();
 
 		// Optional: Clean up storage for completed orders
+
+		// Start monitoring for finalization
+		self.monitor_order_finalization(order_id, tx_hash, _receipt.block_number)
+			.await?;
 
 		Ok(())
 	}
@@ -790,6 +789,55 @@ impl SolverEngine {
 	/// Returns a reference to the storage service.
 	pub fn storage(&self) -> &Arc<StorageService> {
 		&self.storage
+	}
+
+	/// Monitors order finalization based on block confirmations
+	async fn monitor_order_finalization(
+		&self,
+		order_id: String,
+		tx_hash: solver_types::TransactionHash,
+		_claim_block_number: u64, // Not needed with wait_for_confirmation
+	) -> Result<(), SolverError> {
+		let storage = self.storage.clone();
+		let delivery = self.delivery.clone();
+		let event_bus = self.event_bus.clone(); // Add this
+		let finalization_confirmations = self.config.delivery.finalization_confirmations;
+
+		tokio::spawn(async move {
+			match delivery.confirm(&tx_hash, finalization_confirmations).await {
+				Ok(_receipt) => {
+					// Mark as finalized
+					if let Err(e) = storage
+						.update_order_status(&order_id, OrderStatus::Finalized)
+						.await
+					{
+						tracing::error!("Failed to finalize order {}: {}", order_id, e);
+					} else {
+						tracing::info!(
+							"Order {} finalized after {} confirmations",
+							order_id,
+							finalization_confirmations
+						);
+
+						// Publish completed event
+						event_bus
+							.publish(SolverEvent::Settlement(SettlementEvent::Completed {
+								order_id: order_id.clone(),
+							}))
+							.ok();
+					}
+				}
+				Err(e) => {
+					tracing::warn!(
+						"Failed to wait for finalization confirmations for order {}: {}",
+						order_id,
+						e
+					);
+				}
+			}
+		});
+
+		Ok(())
 	}
 }
 

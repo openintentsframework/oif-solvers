@@ -257,6 +257,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			created_at: intent.metadata.discovered_at,
 			data: serde_json::to_value(&order_data)
 				.map_err(|e| OrderError::ValidationFailed(format!("Failed to serialize: {}", e)))?,
+			quote_id: intent.quote_id.clone(),
 			updated_at: std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
 				.map(|d| d.as_secs())

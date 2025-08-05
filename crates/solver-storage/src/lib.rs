@@ -10,6 +10,7 @@ use solver_types::{
 	ExecutionParams, FillProof, Order, OrderStatus, TransactionHash, TransactionType,
 };
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 /// Re-export implementations
@@ -186,8 +187,6 @@ impl StorageService {
 	/// This is a specialized method for updating Order structs that automatically
 	/// handles the updated_at field.
 	pub async fn update_order(&self, order_id: &str, mut order: Order) -> Result<(), StorageError> {
-		use std::time::{SystemTime, UNIX_EPOCH};
-
 		// Automatically set updated_at to current timestamp
 		order.updated_at = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
@@ -206,7 +205,6 @@ impl StorageService {
 		let mut order: Order = self.retrieve("orders", order_id).await?;
 		// Set finalized timestamp if transitioning to Finalized
 		if matches!(status, OrderStatus::Finalized) {
-			use std::time::{SystemTime, UNIX_EPOCH};
 			order.metadata.finalized_at = Some(
 				SystemTime::now()
 					.duration_since(UNIX_EPOCH)
@@ -227,7 +225,7 @@ impl StorageService {
 	) -> Result<(), StorageError> {
 		let mut order: Order = self.retrieve("orders", order_id).await?;
 		order.execution_params = Some(params);
-		order.status = solver_types::OrderStatus::PreparedForExecution;
+		order.status = OrderStatus::Pending;
 		self.update_order(order_id, order).await
 	}
 
@@ -239,7 +237,6 @@ impl StorageService {
 		tx_hash: TransactionHash,
 	) -> Result<(), StorageError> {
 		let mut order: Order = self.retrieve("orders", order_id).await?;
-		// TODO: check if we can search by tx_hash instead of order_id!
 
 		match tx_type {
 			TransactionType::Prepare => {
@@ -251,7 +248,7 @@ impl StorageService {
 			}
 			TransactionType::Claim => {
 				order.claim_tx_hash = Some(tx_hash);
-				order.status = OrderStatus::Finalized;
+				order.status = OrderStatus::Claimed;
 			}
 		}
 

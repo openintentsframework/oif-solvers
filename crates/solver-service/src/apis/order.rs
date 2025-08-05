@@ -8,7 +8,7 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, GetOrderError, GetOrderResponse, OrderResponse, OrderStatus, SettlementType,
+	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, OrderStatus, SettlementType,
 };
 use tracing::info;
 
@@ -73,7 +73,7 @@ fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
 
 /// Converts a storage Order to an API OrderResponse.
 async fn convert_order_to_response(
-	order: solver_types::Order,
+	order: Order,
 	solver: &SolverEngine,
 ) -> Result<OrderResponse, GetOrderError> {
 	// Handle EIP-7683 order format
@@ -212,7 +212,7 @@ async fn convert_eip7683_order_to_response(
 		status,
 		created_at: order.created_at,
 		updated_at: order.updated_at,
-		quote_id: None, // TODO: Retrieve quote ID from storage (or from other source?)
+		quote_id: order.quote_id,
 		input_amount,
 		output_amount,
 		settlement_type,
@@ -229,14 +229,13 @@ async fn derive_order_status_from_events(
 	_solver: &SolverEngine,
 ) -> Result<OrderStatus, GetOrderError> {
 	match order.status {
-		OrderStatus::Finalized => {
-			// Double-check that we have a claim transaction or completion timestamp
-			if order.claim_tx_hash.is_some() || order.metadata.finalized_at.is_some() {
-				Ok(OrderStatus::Finalized)
-			} else {
-				// Status says finalized but missing transaction - might be inconsistent (is it OK?)
-				Ok(OrderStatus::Executed)
-			}
+		OrderStatus::Pending => {
+			// Default pending state
+			Ok(OrderStatus::Pending)
+		}
+		OrderStatus::Executing => {
+			// Order is currently being executed
+			Ok(OrderStatus::Executing)
 		}
 		OrderStatus::Executed => {
 			// Verify we have a fill transaction
@@ -246,27 +245,22 @@ async fn derive_order_status_from_events(
 				Ok(OrderStatus::Pending)
 			}
 		}
-		OrderStatus::Executing => {
-			// Order is currently being executed
-			Ok(OrderStatus::Executing)
+		OrderStatus::Claimed => {
+			// Order has been claimed
+			Ok(OrderStatus::Claimed)
 		}
-		// TODO: double check this status!
-		OrderStatus::PreparedForExecution => {
-			// Order has execution params and is ready to execute
-			if order.execution_params.is_some() {
-				Ok(OrderStatus::PreparedForExecution)
+		OrderStatus::Finalized => {
+			// Double-check that we have a claim transaction or completion timestamp
+			if order.claim_tx_hash.is_some() || order.metadata.finalized_at.is_some() {
+				Ok(OrderStatus::Finalized)
 			} else {
-				// Inconsistent state - fall back to pending
-				Ok(OrderStatus::Pending)
+				// Status says finalized but missing transaction - might be inconsistent (is it OK?)
+				Ok(OrderStatus::Executed)
 			}
 		}
 		OrderStatus::Failed => {
 			// Order failed - check if we have error details
 			Ok(OrderStatus::Failed)
-		}
-		OrderStatus::Pending => {
-			// Default pending state
-			Ok(OrderStatus::Pending)
 		}
 	}
 }

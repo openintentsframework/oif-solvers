@@ -27,6 +27,9 @@ pub struct Order {
 	pub status: OrderStatus,
 	/// Standard-specific order data in JSON format.
 	pub data: serde_json::Value,
+	/// Quote ID associated with this order.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub quote_id: Option<String>,
 	/// Execution parameters when order is ready for execution.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub execution_params: Option<ExecutionParams>,
@@ -157,15 +160,15 @@ pub struct OrderResponse {
 /// Status of an order in the solver system.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OrderStatus {
-	/// Order is pending execution decision.
+	/// Order is pending execution.
 	Pending,
-	/// Order is prepared and waiting for execution.
-	PreparedForExecution,
-	/// Order execution is in progress.
+	/// Order is currently being executed.
 	Executing,
-	/// Order has been executed (fill transaction submitted).
+	/// Order has been executed.
 	Executed,
-	/// Order is finalized and complete.
+	/// Order has been claimed.
+	Claimed,
+	/// Order is finalized and complete (after some block confirmations).
 	Finalized,
 	/// Order execution failed.
 	Failed,
