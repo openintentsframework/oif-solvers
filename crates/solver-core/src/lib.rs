@@ -14,9 +14,8 @@ use solver_order::OrderService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
-	DeliveryEvent, DiscoveryEvent, EventBus, ExecutionContext, ExecutionDecision, ExecutionParams,
-	Intent, Order, OrderEvent, OrderStatus, SettlementEvent, SolverEvent, TransactionHash,
-	TransactionType,
+	DeliveryEvent, DiscoveryEvent, EventBus, ExecutionContext, ExecutionDecision, Intent, Order,
+	OrderEvent, OrderStatus, SettlementEvent, SolverEvent, TransactionType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
