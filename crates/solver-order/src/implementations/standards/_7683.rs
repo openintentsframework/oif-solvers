@@ -10,7 +10,7 @@ use alloy_sol_types::{sol, SolCall, SolValue};
 use async_trait::async_trait;
 use solver_types::{
 	Address, ConfigSchema, Eip7683OrderData, ExecutionParams, Field, FieldType, FillProof, Intent,
-	Order, OrderMetadata, OrderStatus, Schema, Transaction,
+	Order, OrderStatus, Schema, Transaction,
 };
 
 // Solidity type definitions for EIP-7683 contract interactions.
@@ -268,7 +268,6 @@ impl OrderInterface for Eip7683OrderImpl {
 			fill_tx_hash: None,
 			claim_tx_hash: None,
 			fill_proof: None,
-			metadata: OrderMetadata::default(),
 		})
 	}
 

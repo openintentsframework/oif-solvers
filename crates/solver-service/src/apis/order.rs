@@ -8,7 +8,8 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, OrderStatus, SettlementType,
+	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, OrderStatus, Settlement,
+	SettlementType,
 };
 use tracing::info;
 
@@ -195,17 +196,13 @@ async fn convert_eip7683_order_to_response(
 	let status = derive_order_status_from_events(&order, solver).await?;
 
 	// Try to retrieve fill transaction hash from storage
-	let fill_transaction = if let Some(fill_tx_hash) = &order.fill_tx_hash {
-		// Create a structured fill transaction object
-		Some(serde_json::json!({
+	let fill_transaction = order.fill_tx_hash.as_ref().map(|fill_tx_hash| {
+		serde_json::json!({
 			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
-			"status": "confirmed", // or derive from actual status
-			"timestamp": order.updated_at // use the order's updated timestamp
-		}))
-	} else {
-		// Fall back to existing data in order.data if available
-		order.data.get("fillTransaction").cloned()
-	};
+			"status": status,
+			"timestamp": order.updated_at
+		})
+	});
 
 	let response = OrderResponse {
 		id: order.id,
@@ -215,8 +212,10 @@ async fn convert_eip7683_order_to_response(
 		quote_id: order.quote_id,
 		input_amount,
 		output_amount,
-		settlement_type,
-		settlement_data,
+		settlement: Settlement {
+			settlement_type,
+			data: settlement_data,
+		},
 		fill_transaction,
 	};
 
@@ -233,10 +232,6 @@ async fn derive_order_status_from_events(
 			// Default pending state
 			Ok(OrderStatus::Pending)
 		}
-		OrderStatus::Executing => {
-			// Order is currently being executed
-			Ok(OrderStatus::Executing)
-		}
 		OrderStatus::Executed => {
 			// Verify we have a fill transaction
 			if order.fill_tx_hash.is_some() {
@@ -251,7 +246,7 @@ async fn derive_order_status_from_events(
 		}
 		OrderStatus::Finalized => {
 			// Double-check that we have a claim transaction or completion timestamp
-			if order.claim_tx_hash.is_some() || order.metadata.finalized_at.is_some() {
+			if order.claim_tx_hash.is_some() {
 				Ok(OrderStatus::Finalized)
 			} else {
 				// Status says finalized but missing transaction - might be inconsistent (is it OK?)

@@ -83,20 +83,11 @@ pub struct DeliveryConfig {
 	/// Defaults to 12 confirmations if not specified.
 	#[serde(default = "default_confirmations")]
 	pub min_confirmations: u64,
-	/// Additional confirmations required before marking orders as finalized.
-	/// Defaults to 50 confirmations (beyond min_confirmations) if not specified.
-	#[serde(default = "default_finalization_confirmations")]
-	pub finalization_confirmations: u64,
 }
 
 /// Returns the default number of confirmations required.
 fn default_confirmations() -> u64 {
 	12 // Default to 12 confirmations
-}
-
-/// Returns the default number of confirmations required.
-fn default_finalization_confirmations() -> u64 {
-	12 // Additional confirmations for finalization
 }
 
 /// Configuration for account management.

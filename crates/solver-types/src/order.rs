@@ -45,29 +45,6 @@ pub struct Order {
 	/// Fill proof data when available.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub fill_proof: Option<FillProof>,
-	/// Additional metadata for tracking order progress.
-	#[serde(default)]
-	pub metadata: OrderMetadata,
-}
-
-/// Additional metadata for order tracking.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct OrderMetadata {
-	/// Quote ID associated with this order.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub quote_id: Option<String>,
-	/// Timestamp when order was finalized.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub finalized_at: Option<u64>,
-	/// Error message if order failed.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub error_message: Option<String>,
-	/// Number of execution attempts.
-	#[serde(default)]
-	pub execution_attempts: u32,
-	/// Timestamp of last execution attempt.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub last_attempt_at: Option<u64>,
 }
 
 /// Parameters for executing an order.
@@ -124,6 +101,16 @@ pub struct FillProof {
 	pub oracle_address: String,
 }
 
+/// Settlement information for an order
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settlement {
+	/// Settlement mechanism type
+	#[serde(rename = "type")]
+	pub settlement_type: SettlementType,
+	/// Settlement-specific data
+	pub data: serde_json::Value,
+}
+
 /// Order response for API endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderResponse {
@@ -146,12 +133,8 @@ pub struct OrderResponse {
 	/// Output asset and amount
 	#[serde(rename = "outputAmount")]
 	pub output_amount: AssetAmount,
-	/// Settlement mechanism type
-	#[serde(rename = "settlementType")]
-	pub settlement_type: SettlementType,
-	/// Settlement-specific data
-	#[serde(rename = "settlementData")]
-	pub settlement_data: serde_json::Value,
+	/// Settlement information
+	pub settlement: Settlement,
 	/// Transaction details if order has been executed
 	#[serde(rename = "fillTransaction")]
 	pub fill_transaction: Option<serde_json::Value>,
@@ -162,8 +145,6 @@ pub struct OrderResponse {
 pub enum OrderStatus {
 	/// Order is pending execution.
 	Pending,
-	/// Order is currently being executed.
-	Executing,
 	/// Order has been executed.
 	Executed,
 	/// Order has been claimed.
