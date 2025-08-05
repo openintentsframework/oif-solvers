@@ -101,7 +101,6 @@ impl SolverEngine {
 			tokio::select! {
 				// Handle discovered intents
 				Some(intent) = intent_rx.recv() => {
-					println!("Discovered intent ID: {:?}", intent.id);
 					tracing::info!(
 						order_id = %truncate_id(&intent.id),
 						"Discovered intent"
@@ -269,7 +268,6 @@ impl SolverEngine {
 				.ok();
 
 			// Store tx_hash -> order_id mapping
-			// TODO: check if we need to store this in storage or just use the order id
 			self.storage
 				.store("tx_to_order", &hex::encode(&prepare_tx_hash.0), &order.id)
 				.await
@@ -279,11 +277,6 @@ impl SolverEngine {
 			self.update_order_with(&order.id, |order| {
 				order.execution_params = Some(params.clone());
 				order.status = OrderStatus::Pending;
-			})
-			.await?;
-
-			// Update order with prepare tx hash
-			self.update_order_with(&order.id, |order| {
 				order.prepare_tx_hash = Some(prepare_tx_hash);
 			})
 			.await?;
@@ -697,23 +690,25 @@ impl SolverEngine {
 			}
 		};
 
-		// Update order with claim transaction hash
+		// Update order with claim transaction hash and mark as finalized
 		self.update_order_with(&order_id, |order| {
 			order.claim_tx_hash = Some(tx_hash.clone());
+			order.status = OrderStatus::Finalized;
 		})
 		.await?;
 
 		// Emit completed event
 		tracing::info!(
 			order_id = %truncate_id(&order_id),
-			"Completed"
+			"Completed and finalized"
 		);
 
-		// Optional: Clean up storage for completed orders
-
-		// Start monitoring for finalization
-		self.monitor_order_finalization(order_id, tx_hash, _receipt.block_number)
-			.await?;
+		// Publish completed event
+		self.event_bus
+			.publish(SolverEvent::Settlement(SettlementEvent::Completed {
+				order_id: order_id.clone(),
+			}))
+			.ok();
 
 		Ok(())
 	}
@@ -807,65 +802,6 @@ impl SolverEngine {
 	/// Returns a reference to the storage service.
 	pub fn storage(&self) -> &Arc<StorageService> {
 		&self.storage
-	}
-
-	/// Monitors order finalization based on block confirmations
-	async fn monitor_order_finalization(
-		&self,
-		order_id: String,
-		tx_hash: solver_types::TransactionHash,
-		_claim_block_number: u64, // Not needed with wait_for_confirmation
-	) -> Result<(), SolverError> {
-		let storage = self.storage.clone();
-		let delivery = self.delivery.clone();
-		let event_bus = self.event_bus.clone(); // Add this
-		let finalization_confirmations = self.config.delivery.min_confirmations;
-
-		tokio::spawn(async move {
-			match delivery.confirm(&tx_hash, finalization_confirmations).await {
-				Ok(_receipt) => {
-					// Mark as finalized - use storage directly
-					let mut order: Order = match storage.retrieve("orders", &order_id).await {
-						Ok(order) => order,
-						Err(e) => {
-							tracing::error!("Failed to retrieve order {}: {}", order_id, e);
-							return;
-						}
-					};
-					order.status = OrderStatus::Finalized;
-					order.updated_at = SystemTime::now()
-						.duration_since(UNIX_EPOCH)
-						.unwrap()
-						.as_secs();
-
-					if let Err(e) = storage.update("orders", &order_id, &order).await {
-						tracing::error!("Failed to finalize order {}: {}", order_id, e);
-					} else {
-						tracing::info!(
-							"Order {} finalized after {} confirmations",
-							order_id,
-							finalization_confirmations
-						);
-
-						// Publish completed event
-						event_bus
-							.publish(SolverEvent::Settlement(SettlementEvent::Completed {
-								order_id: order_id.clone(),
-							}))
-							.ok();
-					}
-				}
-				Err(e) => {
-					tracing::warn!(
-						"Failed to wait for finalization confirmations for order {}: {}",
-						order_id,
-						e
-					);
-				}
-			}
-		});
-
-		Ok(())
 	}
 
 	/// Generic helper to update any part of an order

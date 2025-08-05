@@ -8,8 +8,7 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, OrderStatus, Settlement,
-	SettlementType,
+	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, Settlement, SettlementType,
 };
 use tracing::info;
 
@@ -44,7 +43,7 @@ async fn process_order_request(
 	{
 		Ok(order) => {
 			// Order found in storage, convert to OrderResponse
-			convert_order_to_response(order, solver).await
+			convert_order_to_response(order).await
 		}
 		Err(solver_storage::StorageError::NotFound) => {
 			// Order not found in storage
@@ -73,13 +72,10 @@ fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
 }
 
 /// Converts a storage Order to an API OrderResponse.
-async fn convert_order_to_response(
-	order: Order,
-	solver: &SolverEngine,
-) -> Result<OrderResponse, GetOrderError> {
+async fn convert_order_to_response(order: Order) -> Result<OrderResponse, GetOrderError> {
 	// Handle EIP-7683 order format
 	if order.standard == "eip7683" {
-		convert_eip7683_order_to_response(order, solver).await
+		convert_eip7683_order_to_response(order).await
 	} else {
 		// Handle other standards
 		Err(GetOrderError::Internal(
@@ -91,7 +87,6 @@ async fn convert_order_to_response(
 /// Converts an EIP-7683 order to API OrderResponse format.
 async fn convert_eip7683_order_to_response(
 	order: solver_types::Order,
-	solver: &SolverEngine,
 ) -> Result<OrderResponse, GetOrderError> {
 	// Extract input amount from EIP-7683 "inputs" field
 	let inputs = order.data.get("inputs").ok_or_else(|| {
@@ -192,21 +187,18 @@ async fn convert_eip7683_order_to_response(
 		"expires": order.data.get("expires").cloned().unwrap_or_else(|| serde_json::json!(null))
 	});
 
-	// Derive status from SolverEvent state stored in the system
-	let status = derive_order_status_from_events(&order, solver).await?;
-
 	// Try to retrieve fill transaction hash from storage
 	let fill_transaction = order.fill_tx_hash.as_ref().map(|fill_tx_hash| {
 		serde_json::json!({
 			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
-			"status": status,
+			"status": order.status,
 			"timestamp": order.updated_at
 		})
 	});
 
 	let response = OrderResponse {
 		id: order.id,
-		status,
+		status: order.status,
 		created_at: order.created_at,
 		updated_at: order.updated_at,
 		quote_id: order.quote_id,
@@ -220,42 +212,4 @@ async fn convert_eip7683_order_to_response(
 	};
 
 	Ok(response)
-}
-
-/// Derives OrderStatus from the unified order data in storage.
-async fn derive_order_status_from_events(
-	order: &solver_types::Order,
-	_solver: &SolverEngine,
-) -> Result<OrderStatus, GetOrderError> {
-	match order.status {
-		OrderStatus::Pending => {
-			// Default pending state
-			Ok(OrderStatus::Pending)
-		}
-		OrderStatus::Executed => {
-			// Verify we have a fill transaction
-			if order.fill_tx_hash.is_some() {
-				Ok(OrderStatus::Executed)
-			} else {
-				Ok(OrderStatus::Pending)
-			}
-		}
-		OrderStatus::Claimed => {
-			// Order has been claimed
-			Ok(OrderStatus::Claimed)
-		}
-		OrderStatus::Finalized => {
-			// Double-check that we have a claim transaction or completion timestamp
-			if order.claim_tx_hash.is_some() {
-				Ok(OrderStatus::Finalized)
-			} else {
-				// Status says finalized but missing transaction - might be inconsistent (is it OK?)
-				Ok(OrderStatus::Executed)
-			}
-		}
-		OrderStatus::Failed => {
-			// Order failed - check if we have error details
-			Ok(OrderStatus::Failed)
-		}
-	}
 }
