@@ -335,7 +335,7 @@ fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quot
 		}
 	};
 
-	// Generate EIP-712 compliant order message
+	// Generate EIP-712 compliant order message (TODO we need to )
 	let order_message = serde_json::json!({
 		"user": request.user,
 		"availableInputs": request.available_inputs,
@@ -372,6 +372,7 @@ fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quot
 }
 
 /// Calculates estimated time to completion based on preference.
+/// TODO - This is a placeholder, we need to calculate the actual ETA based on the request and the solver's capabilities
 fn calculate_eta(preference: &Option<QuotePreference>) -> u64 {
 	// Base ETA of 2 minutes
 	let base_eta = 120;
