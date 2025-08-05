@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use crate::{Address, AssetAmount, SettlementType, TransactionHash};
 
-/// Represents a validated cross-chain order.
+/// Represents a validated cross-chain order with execution state.
 ///
 /// An order is created from a validated intent and contains all information
-/// necessary for execution and settlement.
+/// necessary for execution, settlement, and tracking throughout its lifecycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
 	/// Unique identifier for this order.
@@ -21,8 +21,50 @@ pub struct Order {
 	pub standard: String,
 	/// Timestamp when this order was created.
 	pub created_at: u64,
+	/// Timestamp when this order was last updated.
+	pub updated_at: u64,
+	/// Current status of the order.
+	pub status: OrderStatus,
 	/// Standard-specific order data in JSON format.
 	pub data: serde_json::Value,
+	/// Execution parameters when order is ready for execution.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub execution_params: Option<ExecutionParams>,
+	/// Transaction hash of the prepare transaction (if applicable).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub prepare_tx_hash: Option<TransactionHash>,
+	/// Transaction hash of the fill transaction.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub fill_tx_hash: Option<TransactionHash>,
+	/// Transaction hash of the claim transaction.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub claim_tx_hash: Option<TransactionHash>,
+	/// Fill proof data when available.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub fill_proof: Option<FillProof>,
+	/// Additional metadata for tracking order progress.
+	#[serde(default)]
+	pub metadata: OrderMetadata,
+}
+
+/// Additional metadata for order tracking.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OrderMetadata {
+	/// Quote ID associated with this order.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub quote_id: Option<String>,
+	/// Timestamp when order was finalized.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub finalized_at: Option<u64>,
+	/// Error message if order failed.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub error_message: Option<String>,
+	/// Number of execution attempts.
+	#[serde(default)]
+	pub execution_attempts: u32,
+	/// Timestamp of last execution attempt.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub last_attempt_at: Option<u64>,
 }
 
 /// Parameters for executing an order.
@@ -90,8 +132,8 @@ pub struct OrderResponse {
 	#[serde(rename = "createdAt")]
 	pub created_at: u64,
 	/// Timestamp when this order was last updated
-	#[serde(rename = "lastUpdated")]
-	pub last_updated: u64,
+	#[serde(rename = "updatedAt")]
+	pub updated_at: u64,
 	/// Associated quote ID if available
 	#[serde(rename = "quoteId")]
 	pub quote_id: Option<String>,
@@ -113,10 +155,18 @@ pub struct OrderResponse {
 }
 
 /// Status of an order in the solver system.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OrderStatus {
+	/// Order is pending execution decision.
 	Pending,
+	/// Order is prepared and waiting for execution.
+	PreparedForExecution,
+	/// Order execution is in progress.
+	Executing,
+	/// Order has been executed (fill transaction submitted).
 	Executed,
+	/// Order is finalized and complete.
 	Finalized,
+	/// Order execution failed.
 	Failed,
 }

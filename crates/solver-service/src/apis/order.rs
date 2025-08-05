@@ -195,16 +195,12 @@ async fn convert_eip7683_order_to_response(
 	let status = derive_order_status_from_events(&order, solver).await?;
 
 	// Try to retrieve fill transaction hash from storage
-	let fill_transaction = if let Ok(fill_tx_hash) = solver
-		.storage()
-		.retrieve::<solver_types::TransactionHash>("fills", &order.id)
-		.await
-	{
+	let fill_transaction = if let Some(fill_tx_hash) = &order.fill_tx_hash {
 		// Create a structured fill transaction object
 		Some(serde_json::json!({
 			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
 			"status": "confirmed", // or derive from actual status
-			"timestamp": chrono::Utc::now().timestamp() // you might want to store actual timestamp
+			"timestamp": order.updated_at // use the order's updated timestamp
 		}))
 	} else {
 		// Fall back to existing data in order.data if available
@@ -215,7 +211,7 @@ async fn convert_eip7683_order_to_response(
 		id: order.id,
 		status,
 		created_at: order.created_at,
-		last_updated: chrono::Utc::now().timestamp() as u64,
+		updated_at: order.updated_at,
 		quote_id: None, // TODO: Retrieve quote ID from storage (or from other source?)
 		input_amount,
 		output_amount,
@@ -227,58 +223,50 @@ async fn convert_eip7683_order_to_response(
 	Ok(response)
 }
 
-/// Derives OrderStatus from the current state of the order in the event-driven system.
+/// Derives OrderStatus from the unified order data in storage.
 async fn derive_order_status_from_events(
 	order: &solver_types::Order,
-	solver: &SolverEngine,
+	_solver: &SolverEngine,
 ) -> Result<OrderStatus, GetOrderError> {
-	let order_id = &order.id;
-
-	// Check if order has been completed (claim transaction confirmed)
-	if let Ok(_completion_time) = solver
-		.storage()
-		.retrieve::<u64>("completed_orders", order_id)
-		.await
-	{
-		return Ok(OrderStatus::Finalized);
-	}
-
-	// Also check for completion status in order data (updated by core solver)
-	if let Some(status) = order.data.get("status") {
-		if status.as_str() == Some("Finalized") {
-			return Ok(OrderStatus::Finalized);
+	match order.status {
+		OrderStatus::Finalized => {
+			// Double-check that we have a claim transaction or completion timestamp
+			if order.claim_tx_hash.is_some() || order.metadata.finalized_at.is_some() {
+				Ok(OrderStatus::Finalized)
+			} else {
+				// Status says finalized but missing transaction - might be inconsistent (is it OK?)
+				Ok(OrderStatus::Executed)
+			}
+		}
+		OrderStatus::Executed => {
+			// Verify we have a fill transaction
+			if order.fill_tx_hash.is_some() {
+				Ok(OrderStatus::Executed)
+			} else {
+				Ok(OrderStatus::Pending)
+			}
+		}
+		OrderStatus::Executing => {
+			// Order is currently being executed
+			Ok(OrderStatus::Executing)
+		}
+		// TODO: double check this status!
+		OrderStatus::PreparedForExecution => {
+			// Order has execution params and is ready to execute
+			if order.execution_params.is_some() {
+				Ok(OrderStatus::PreparedForExecution)
+			} else {
+				// Inconsistent state - fall back to pending
+				Ok(OrderStatus::Pending)
+			}
+		}
+		OrderStatus::Failed => {
+			// Order failed - check if we have error details
+			Ok(OrderStatus::Failed)
+		}
+		OrderStatus::Pending => {
+			// Default pending state
+			Ok(OrderStatus::Pending)
 		}
 	}
-
-	// Check if the order has a fill transaction (indicates execution started)
-	if let Ok(_fill_tx_hash) = solver
-		.storage()
-		.retrieve::<solver_types::TransactionHash>("fills", order_id)
-		.await
-	{
-		// Order has been executed (fill transaction submitted) but not yet finalized
-		return Ok(OrderStatus::Executed);
-	}
-
-	// Check if order has pending execution
-	if let Ok(_) = solver
-		.storage()
-		.retrieve::<(solver_types::Order, solver_types::ExecutionParams)>(
-			"pending_execution",
-			order_id,
-		)
-		.await
-	{
-		return Ok(OrderStatus::Pending);
-	}
-
-	// Fall back to checking stored status in order data
-	if let Some(stored_status) = order.data.get("status") {
-		if let Ok(status) = serde_json::from_value::<OrderStatus>(stored_status.clone()) {
-			return Ok(status);
-		}
-	}
-
-	// Default to Pending
-	Ok(OrderStatus::Pending)
 }
