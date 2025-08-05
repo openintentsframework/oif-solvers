@@ -66,8 +66,6 @@ pub struct SolverConfig {
 	/// Defaults to 480 minutes (8 hours) if not specified.
 	#[serde(default = "default_monitoring_timeout_minutes")]
 	pub monitoring_timeout_minutes: u64,
-	/// Domain configuration for EIP-712 signatures in quotes.
-	pub domain: Option<DomainConfig>,
 }
 
 /// Returns the default monitoring timeout in minutes.
@@ -143,6 +141,8 @@ pub struct SettlementConfig {
 	/// Map of settlement implementation names to their configurations.
 	/// Each implementation handles specific settlement mechanisms.
 	pub implementations: HashMap<String, toml::Value>,
+	/// Domain configuration for EIP-712 signatures in quotes.
+	pub domain: Option<DomainConfig>,
 }
 
 /// Configuration for the HTTP API server.

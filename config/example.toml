@@ -4,11 +4,6 @@
 id = "oif-solver-local-dual-chain"
 monitoring_timeout_minutes = 5
 
-# Domain configuration for EIP-712 signatures in quotes
-[solver.domain]
-chain_id = 1  # Ethereum mainnet
-address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-
 [storage]
 backend = "file"
 [storage.config]
@@ -67,6 +62,11 @@ rpc_url = "http://localhost:8546"  # Settlement needs to validate fills on desti
 # Oracle address on origin chain
 oracle_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 dispute_period_seconds = 1  # 1 seconds for testing
+
+# Domain configuration for EIP-712 signatures in quotes
+[settlement.domain]
+chain_id = 1  # Ethereum mainnet 
+address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 
 # API server configuration
 [api]

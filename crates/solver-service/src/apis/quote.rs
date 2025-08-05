@@ -319,7 +319,7 @@ fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quot
 	let quote_id = Uuid::new_v4().to_string();
 	
 	// Get domain address from configuration if available, otherwise use default
-	let domain_address = match &config.solver.domain {
+	let domain_address = match &config.settlement.domain {
 		Some(domain_config) => {
 			// Parse the address from the configuration
 			let address = domain_config.address.parse()
