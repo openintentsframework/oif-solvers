@@ -318,7 +318,6 @@ async fn generate_quotes(request: &GetQuoteRequest, config: &Config) -> Result<V
 fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quote, QuoteError> {
 	let quote_id = Uuid::new_v4().to_string();
 	
-	// Get domain address from configuration if available, otherwise use default
 	let domain_address = match &config.settlement.domain {
 		Some(domain_config) => {
 			// Parse the address from the configuration
@@ -327,15 +326,13 @@ fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quot
 			InteropAddress::new_ethereum(domain_config.chain_id, address)
 		}
 		None => {
-			// Fallback to default for backwards compatibility
-			InteropAddress::new_ethereum(
-				1, // Ethereum mainnet
-				"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9".parse().unwrap(),
-			)
+			return Err(QuoteError::InvalidRequest(
+				"Domain configuration is required but not provided in solver config".to_string()
+			));
 		}
 	};
 
-	// Generate EIP-712 compliant order message (TODO we need to )
+	// Generate EIP-712 compliant order message (TODO we need to return the real orderType (permit2, 3009, orderData etc))
 	let order_message = serde_json::json!({
 		"user": request.user,
 		"availableInputs": request.available_inputs,
