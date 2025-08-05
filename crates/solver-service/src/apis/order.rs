@@ -62,7 +62,7 @@ async fn process_order_request(
 
 /// Validates the order ID format.
 fn validate_order_id(order_id: &str) -> Result<(), GetOrderError> {
-	// Remove UUID validation - accept any non-empty string as order ID
+	// Validate order id is not empty
 	if order_id.is_empty() {
 		return Err(GetOrderError::InvalidId(
 			"Order ID cannot be empty".to_string(),
