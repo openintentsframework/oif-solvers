@@ -276,22 +276,31 @@ impl SolverEngine {
 				.await
 				.map_err(|e| SolverError::Service(e.to_string()))?;
 
-			// Update order with execution params and prepare tx hash
-			self.set_order_execution_params(&order.id, params)
-				.await
-				.map_err(|e| SolverError::Service(e.to_string()))?;
+			// Update order with execution params
+			self.update_order_with(&order.id, |order| {
+				order.execution_params = Some(params.clone());
+				order.status = OrderStatus::Pending;
+			})
+			.await?;
 
-			self.set_order_transaction(&order.id, TransactionType::Prepare, prepare_tx_hash)
-				.await
-				.map_err(|e| SolverError::Service(e.to_string()))?;
+			// Update order with prepare tx hash
+			self.update_order_with(&order.id, |order| {
+				order.prepare_tx_hash = Some(prepare_tx_hash);
+			})
+			.await?;
 		} else {
 			// No preparation needed, set execution params and proceed
-			self.set_order_execution_params(&order.id, params.clone())
-				.await
-				.map_err(|e| SolverError::Service(e.to_string()))?;
+			self.update_order_with(&order.id, |order| {
+				order.execution_params = Some(params.clone());
+				order.status = OrderStatus::Pending;
+			})
+			.await?;
 
 			self.event_bus
-				.publish(SolverEvent::Order(OrderEvent::Executing { order, params }))
+				.publish(SolverEvent::Order(OrderEvent::Executing {
+					order: order.clone(),
+					params,
+				}))
 				.ok();
 		}
 
@@ -333,9 +342,10 @@ impl SolverEngine {
 			.ok();
 
 		// Store fill transaction and timestamp
-		self.set_order_transaction(&order.id, TransactionType::Fill, tx_hash.clone())
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
+		self.update_order_with(&order.id, |order| {
+			order.fill_tx_hash = Some(tx_hash.clone());
+		})
+		.await?;
 
 		// Store reverse mapping: tx_hash -> order_id
 		self.storage
@@ -548,9 +558,10 @@ impl SolverEngine {
 			.ok_or_else(|| SolverError::Service("Order missing execution params".to_string()))?;
 
 		// Update order status to executing
-		self.update_order_status(&order_id, OrderStatus::Executed)
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
+		self.update_order_with(&order.id, |order| {
+			order.status = OrderStatus::Executed;
+		})
+		.await?;
 
 		// Now publish Executing event to proceed with fill
 		self.event_bus
@@ -688,9 +699,10 @@ impl SolverEngine {
 		};
 
 		// Update order with claim transaction hash
-		self.set_order_transaction(&order_id, TransactionType::Claim, tx_hash.clone())
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
+		self.update_order_with(&order_id, |order| {
+			order.claim_tx_hash = Some(tx_hash.clone());
+		})
+		.await?;
 
 		// Emit completed event
 		tracing::info!(
@@ -754,9 +766,10 @@ impl SolverEngine {
 				.ok();
 
 			// Update order with claim transaction hash
-			self.set_order_transaction(&order.id, TransactionType::Claim, claim_tx_hash.clone())
-				.await
-				.map_err(|e| SolverError::Service(e.to_string()))?;
+			self.update_order_with(&order.id, |order| {
+				order.claim_tx_hash = Some(claim_tx_hash.clone());
+			})
+			.await?;
 
 			// Store reverse mapping: tx_hash -> order_id
 			self.storage
@@ -856,81 +869,30 @@ impl SolverEngine {
 		Ok(())
 	}
 
-	/// Helper function to update an order and automatically set the updated_at timestamp.
-	async fn update_order(&self, order_id: &str, mut order: Order) -> Result<(), SolverError> {
-		// Automatically set updated_at to current timestamp
+	/// Generic helper to update any part of an order
+	async fn update_order_with<F>(&self, order_id: &str, updater: F) -> Result<(), SolverError>
+	where
+		F: FnOnce(&mut Order),
+	{
+		let mut order: Order = self
+			.storage
+			.retrieve("orders", order_id)
+			.await
+			.map_err(|e| SolverError::Service(e.to_string()))?;
+
+		// Apply the update
+		updater(&mut order);
+
+		// Automatically set updated_at timestamp
 		order.updated_at = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.map_err(|e| SolverError::Service(format!("Time error: {}", e)))?
 			.as_secs();
 
 		self.storage
-			.update("orders", order_id, &order)
+			.update("orders", &order_id, &order)
 			.await
 			.map_err(|e| SolverError::Service(e.to_string()))
-	}
-
-	/// Helper function to update order status and metadata.
-	async fn update_order_status(
-		&self,
-		order_id: &str,
-		status: OrderStatus,
-	) -> Result<(), SolverError> {
-		let mut order: Order = self
-			.storage
-			.retrieve("orders", order_id)
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
-
-		order.status = status;
-		self.update_order(order_id, order).await
-	}
-
-	/// Helper function to set execution parameters for an order.
-	async fn set_order_execution_params(
-		&self,
-		order_id: &str,
-		params: ExecutionParams,
-	) -> Result<(), SolverError> {
-		let mut order: Order = self
-			.storage
-			.retrieve("orders", order_id)
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
-
-		order.execution_params = Some(params);
-		order.status = OrderStatus::Pending;
-		self.update_order(order_id, order).await
-	}
-
-	/// Helper function to set transaction hash for an order.
-	async fn set_order_transaction(
-		&self,
-		order_id: &str,
-		tx_type: TransactionType,
-		tx_hash: TransactionHash,
-	) -> Result<(), SolverError> {
-		let mut order: Order = self
-			.storage
-			.retrieve("orders", order_id)
-			.await
-			.map_err(|e| SolverError::Service(e.to_string()))?;
-
-		match tx_type {
-			TransactionType::Prepare => {
-				order.prepare_tx_hash = Some(tx_hash);
-			}
-			TransactionType::Fill => {
-				order.fill_tx_hash = Some(tx_hash);
-				order.status = OrderStatus::Executed;
-			}
-			TransactionType::Claim => {
-				order.claim_tx_hash = Some(tx_hash);
-				order.status = OrderStatus::Claimed;
-			}
-		}
-
-		self.update_order(order_id, order).await
 	}
 }
 
