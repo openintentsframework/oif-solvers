@@ -8,7 +8,8 @@ use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
 use solver_types::{
-	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, Settlement, SettlementType,
+	AssetAmount, GetOrderError, GetOrderResponse, Order, OrderResponse, OrderStatus, Settlement,
+	SettlementType, TransactionType,
 };
 use tracing::info;
 
@@ -189,9 +190,18 @@ async fn convert_eip7683_order_to_response(
 
 	// Try to retrieve fill transaction hash from storage
 	let fill_transaction = order.fill_tx_hash.as_ref().map(|fill_tx_hash| {
+		// Determine fill transaction status based on order status
+		let tx_status = match order.status {
+			OrderStatus::Executed | OrderStatus::Claimed | OrderStatus::Finalized => "executed",
+			OrderStatus::Pending => "pending",
+			OrderStatus::Failed(TransactionType::Fill)
+			| OrderStatus::Failed(TransactionType::Prepare) => "failed",
+			OrderStatus::Failed(TransactionType::Claim) => "executed", // Fill succeeded, Claim failed
+		};
+
 		serde_json::json!({
 			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
-			"status": order.status,
+			"status": tx_status,
 			"timestamp": order.updated_at
 		})
 	});

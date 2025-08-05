@@ -7,7 +7,7 @@ use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Address, AssetAmount, SettlementType, TransactionHash};
+use crate::{Address, AssetAmount, SettlementType, TransactionHash, TransactionType};
 
 /// Represents a validated cross-chain order with execution state.
 ///
@@ -151,6 +151,6 @@ pub enum OrderStatus {
 	Claimed,
 	/// Order is finalized and complete (after some block confirmations).
 	Finalized,
-	/// Order execution failed.
-	Failed,
+	/// Order execution failed with specific transaction type.
+	Failed(TransactionType),
 }

@@ -471,7 +471,31 @@ impl SolverEngine {
 		error: String,
 	) -> Result<(), SolverError> {
 		tracing::error!("Transaction failed: {}", error);
-		// TODO: check if we need to update any status in storage
+
+		// Look up order ID and transaction type from the hash
+		if let Ok(order_id) = self
+			.storage
+			.retrieve::<String>("tx_to_order", &hex::encode(&tx_hash.0))
+			.await
+		{
+			// Determine transaction type from stored transaction hashes
+			if let Ok(order) = self.storage.retrieve::<Order>("orders", &order_id).await {
+				let tx_type = if order.prepare_tx_hash.as_ref().map(|h| &h.0) == Some(&tx_hash.0) {
+					TransactionType::Prepare
+				} else if order.fill_tx_hash.as_ref().map(|h| &h.0) == Some(&tx_hash.0) {
+					TransactionType::Fill
+				} else {
+					TransactionType::Claim
+				};
+
+				// Update order status with specific failure type
+				self.update_order_with(&order_id, |order| {
+					order.status = OrderStatus::Failed(tx_type);
+				})
+				.await?;
+			}
+		}
+
 		Ok(())
 	}
 
