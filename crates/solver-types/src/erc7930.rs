@@ -253,6 +253,10 @@ impl<'de> Deserialize<'de> for InteropAddress {
 pub mod utils {
     use super::*;
 
+    pub fn create_interop_address(chain_id: u64, address: Address) -> InteropAddress {
+        InteropAddress::new_ethereum(chain_id, address)
+    }
+
     /// Create an Ethereum mainnet interoperable address
     pub fn ethereum_mainnet_address(address: Address) -> InteropAddress {
         InteropAddress::new_ethereum(1, address)

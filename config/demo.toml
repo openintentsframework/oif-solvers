@@ -4,6 +4,11 @@
 id = "oif-solver-local-dual-chain"
 monitoring_timeout_minutes = 5
 
+# Domain configuration for EIP-712 signatures in quotes
+[solver.domain]
+chain_id = 1  # Ethereum mainnet
+address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+
 [storage]
 backend = "memory" # or "file"
 [storage.config] 

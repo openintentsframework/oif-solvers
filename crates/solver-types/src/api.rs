@@ -92,7 +92,7 @@ pub enum QuotePreference {
 
 /// EIP-712 compliant order structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EIP712Order {
+pub struct QuoteOrder {
 	/// Signature type (eip-712 or erc-3009)
 	#[serde(rename = "signatureType")]
 	pub signature_type: SignatureType,
@@ -128,7 +128,7 @@ pub struct QuoteDetails {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Quote {
 	/// Array of EIP-712 compliant orders
-	pub orders: Vec<EIP712Order>,
+	pub orders: Vec<QuoteOrder>,
 	/// Quote details matching request structure
 	pub details: QuoteDetails,
 	/// Quote validity timestamp
@@ -140,7 +140,7 @@ pub struct Quote {
 	#[serde(rename = "quoteId")]
 	pub quote_id: String,
 	/// Provider identifier
-	pub provider: String,
+	pub provider: String, // not used by the solver, only relevant for the aggregator
 }
 
 /// Settlement mechanism types.

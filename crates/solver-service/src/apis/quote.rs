@@ -189,10 +189,11 @@
 //! - **Analytics**: Log quote parameters for optimization
 
 use alloy_primitives::U256;
+use solver_config::Config;
 use solver_core::SolverEngine;
 use solver_types::{
 	GetQuoteRequest, GetQuoteResponse, QuoteError, Quote, QuotePreference,
-	QuoteDetails, EIP712Order, SignatureType, InteropAddress,
+	QuoteDetails, QuoteOrder, SignatureType, InteropAddress,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -204,6 +205,7 @@ use uuid::Uuid;
 pub async fn process_quote_request(
 	request: GetQuoteRequest,
 	_solver: &SolverEngine,
+	config: &Config,
 ) -> Result<GetQuoteResponse, QuoteError> {
 	info!(
 		"Processing quote request with {} inputs",
@@ -217,7 +219,7 @@ pub async fn process_quote_request(
 	// TODO: Implement solver capability checking
 
 	// 3. Generate quotes based on available inputs and requested outputs
-	let quotes = generate_quotes(&request).await?;
+	let quotes = generate_quotes(&request, config).await?;
 
 	info!("Generated {} quote options", quotes.len());
 
@@ -287,7 +289,7 @@ fn validate_interop_address(address: &InteropAddress) -> Result<(), QuoteError> 
 }
 
 /// Generates quote options for the given request following UII standard.
-async fn generate_quotes(request: &GetQuoteRequest) -> Result<Vec<Quote>, QuoteError> {
+async fn generate_quotes(request: &GetQuoteRequest, config: &Config) -> Result<Vec<Quote>, QuoteError> {
 	let mut quotes = Vec::new();
 
 	// For demo purposes, generate a basic quote
@@ -298,7 +300,7 @@ async fn generate_quotes(request: &GetQuoteRequest) -> Result<Vec<Quote>, QuoteE
 	// 4. Generate EIP-712 compliant order data
 
 	// Generate a quote that combines all inputs and outputs
-	if let Ok(quote) = generate_uii_quote(request) {
+	if let Ok(quote) = generate_uii_quote(request, config) {
 		quotes.push(quote);
 	}
 
@@ -313,14 +315,25 @@ async fn generate_quotes(request: &GetQuoteRequest) -> Result<Vec<Quote>, QuoteE
 }
 
 /// Generates a UII-compliant quote option.
-fn generate_uii_quote(request: &GetQuoteRequest) -> Result<Quote, QuoteError> {
+fn generate_uii_quote(request: &GetQuoteRequest, config: &Config) -> Result<Quote, QuoteError> {
 	let quote_id = Uuid::new_v4().to_string();
-
-	// Mock settlement contract address (would be from config in real implementation)
-	let domain_address = InteropAddress::new_ethereum(
-		1, // Ethereum mainnet
-		"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9".parse().unwrap(),
-	);
+	
+	// Get domain address from configuration if available, otherwise use default
+	let domain_address = match &config.solver.domain {
+		Some(domain_config) => {
+			// Parse the address from the configuration
+			let address = domain_config.address.parse()
+				.map_err(|e| QuoteError::InvalidRequest(format!("Invalid domain address in config: {}", e)))?;
+			InteropAddress::new_ethereum(domain_config.chain_id, address)
+		}
+		None => {
+			// Fallback to default for backwards compatibility
+			InteropAddress::new_ethereum(
+				1, // Ethereum mainnet
+				"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9".parse().unwrap(),
+			)
+		}
+	};
 
 	// Generate EIP-712 compliant order message
 	let order_message = serde_json::json!({
@@ -328,11 +341,11 @@ fn generate_uii_quote(request: &GetQuoteRequest) -> Result<Quote, QuoteError> {
 		"availableInputs": request.available_inputs,
 		"requestedOutputs": request.requested_outputs,
 		"nonce": chrono::Utc::now().timestamp(),
-		"deadline": chrono::Utc::now().timestamp() + 300 // 5 minutes from now
+		"deadline": chrono::Utc::now().timestamp() + 300 // 5 minutes from now TODO - Calculate ()
 	});
 
 	// Create EIP-712 compliant order
-	let order = EIP712Order {
+	let order = QuoteOrder {
 		signature_type: SignatureType::Eip712,
 		domain: domain_address,
 		primary_type: "GaslessCrossChainOrder".to_string(),

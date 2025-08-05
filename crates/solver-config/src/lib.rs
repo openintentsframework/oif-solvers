@@ -48,6 +48,15 @@ pub struct Config {
 	pub api: Option<ApiConfig>,
 }
 
+/// Domain configuration for EIP-712 signatures in quotes.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DomainConfig {
+	/// Chain ID where the settlement contract is deployed.
+	pub chain_id: u64,
+	/// Settlement contract address.
+	pub address: String,
+}
+
 /// Configuration specific to the solver instance.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SolverConfig {
@@ -57,6 +66,8 @@ pub struct SolverConfig {
 	/// Defaults to 480 minutes (8 hours) if not specified.
 	#[serde(default = "default_monitoring_timeout_minutes")]
 	pub monitoring_timeout_minutes: u64,
+	/// Domain configuration for EIP-712 signatures in quotes.
+	pub domain: Option<DomainConfig>,
 }
 
 /// Returns the default monitoring timeout in minutes.
