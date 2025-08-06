@@ -272,4 +272,30 @@ impl DeliveryService {
 
 		provider.get_nonce(address).await
 	}
+
+	/// Gets the current gas price from the first available provider.
+	///
+	/// Returns the gas price as a string in wei.
+	pub async fn get_gas_price(&self) -> Result<String, DeliveryError> {
+		// Use the first available provider
+		for provider in self.providers.values() {
+			if let Ok(gas_price) = provider.get_gas_price().await {
+				return Ok(gas_price);
+			}
+		}
+		Err(DeliveryError::NoProviderAvailable)
+	}
+
+	/// Gets the current block number from the first available provider.
+	///
+	/// Returns the latest block number.
+	pub async fn get_block_number(&self) -> Result<u64, DeliveryError> {
+		// Use the first available provider
+		for provider in self.providers.values() {
+			if let Ok(block_number) = provider.get_block_number().await {
+				return Ok(block_number);
+			}
+		}
+		Err(DeliveryError::NoProviderAvailable)
+	}
 }

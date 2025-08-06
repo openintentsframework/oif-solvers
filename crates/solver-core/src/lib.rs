@@ -5,7 +5,7 @@
 //! to execute the complete order lifecycle. It includes the event-driven architecture
 //! and factory pattern for building solver instances.
 
-use alloy_primitives::{hex, U256};
+use alloy_primitives::hex;
 use solver_account::AccountService;
 use solver_config::Config;
 use solver_delivery::{DeliveryError, DeliveryService};
@@ -14,9 +14,10 @@ use solver_order::OrderService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
-	ChainData, DeliveryEvent, DiscoveryEvent, EventBus, ExecutionContext, ExecutionDecision, Intent, Order,
+	DeliveryEvent, DiscoveryEvent, EventBus, ExecutionDecision, Intent, Order,
 	OrderEvent, OrderStatus, SettlementEvent, SolverEvent, TransactionType,
 };
+use crate::context::ContextBuilder;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +25,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::instrument;
 
+pub mod context;
 pub mod event_bus;
 
 /// Utility function to truncate a hex string for display purposes.
@@ -71,6 +73,8 @@ pub struct SolverEngine {
 	settlement: Arc<SettlementService>,
 	/// Event bus for inter-service communication.
 	event_bus: EventBus,
+	/// Context builder for execution contexts.
+	context_builder: ContextBuilder,
 }
 
 /// Number of orders to batch together for claim operations.
@@ -102,8 +106,10 @@ impl SolverEngine {
 				// Handle discovered intents
 				Some(intent) = intent_rx.recv() => {
 					tracing::info!(
-						order_id = %truncate_id(&intent.id),
-						"Discovered intent"
+						order_id = &intent.id,
+						intent_source = %intent.source,
+						intent_standard = %intent.standard,
+						"Discovered intent from source"
 					);
 					self.handle_intent(intent).await?;
 				}
@@ -189,7 +195,7 @@ impl SolverEngine {
 					.map_err(|e| SolverError::Service(e.to_string()))?;
 
 				// Check execution strategy
-				let context = self.build_execution_context().await?;
+				let context = self.context_builder.build_execution_context(&intent).await?;
 				match self.order.should_execute(&order, &context).await {
 					ExecutionDecision::Execute(params) => {
 						tracing::info!("Preparing order for execution");
@@ -798,21 +804,6 @@ impl SolverEngine {
 		Ok(())
 	}
 
-	/// Builds the execution context for strategy decisions.
-	///
-	/// TODO: this should fetch real-time data such as gas prices,
-	/// solver balances, and other relevant market conditions.
-	async fn build_execution_context(&self) -> Result<ExecutionContext, SolverError> {
-		Ok(ExecutionContext {
-			gas_price: U256::from(20_000_000_000u64), // 20 gwei
-			timestamp: std::time::SystemTime::now()
-				.duration_since(std::time::UNIX_EPOCH)
-				.unwrap()
-				.as_secs(),
-			solver_balance: HashMap::new(),
-		})
-	}
-
 	/// Returns a reference to the event bus.
 	pub fn event_bus(&self) -> &EventBus {
 		&self.event_bus
@@ -1302,6 +1293,9 @@ impl SolverBuilder {
 
 		let settlement = Arc::new(SettlementService::new(settlement_impls));
 
+		// Create context builder
+		let context_builder = ContextBuilder::new(delivery.clone(), self.config.clone());
+
 		Ok(SolverEngine {
 			config: self.config,
 			storage,
@@ -1310,6 +1304,7 @@ impl SolverBuilder {
 			order,
 			settlement,
 			event_bus: EventBus::new(1000),
+			context_builder,
 		})
 	}
 }
