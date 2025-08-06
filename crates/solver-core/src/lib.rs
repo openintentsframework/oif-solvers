@@ -16,7 +16,7 @@ use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
 	DeliveryEvent, DiscoveryEvent, ExecutionContext, ExecutionDecision, Intent, Order, OrderEvent,
-	OrderStatus, SettlementEvent, SolverEvent, TransactionType,
+	OrderStatus, SettlementEvent, SolverEvent, StorageTable, TransactionType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -179,13 +179,13 @@ impl SolverEngine {
 
 				// Store order
 				self.storage
-					.store("orders", &order.id, &order)
+					.store(StorageTable::Orders.as_str(), &order.id, &order)
 					.await
 					.map_err(|e| SolverError::Service(e.to_string()))?;
 
 				// Store intent for later use
 				self.storage
-					.store("intents", &order.id, &intent)
+					.store(StorageTable::Intents.as_str(), &order.id, &intent)
 					.await
 					.map_err(|e| SolverError::Service(e.to_string()))?;
 
@@ -270,7 +270,11 @@ impl SolverEngine {
 
 			// Store tx_hash -> order_id mapping
 			self.storage
-				.store("tx_to_order", &hex::encode(&prepare_tx_hash.0), &order.id)
+				.store(
+					StorageTable::TxToOrder.as_str(),
+					&hex::encode(&prepare_tx_hash.0),
+					&order.id,
+				)
 				.await
 				.map_err(|e| SolverError::Service(e.to_string()))?;
 
@@ -342,7 +346,11 @@ impl SolverEngine {
 
 		// Store reverse mapping: tx_hash -> order_id
 		self.storage
-			.store("tx_to_order", &hex::encode(&tx_hash.0), &order.id)
+			.store(
+				StorageTable::TxToOrder.as_str(),
+				&hex::encode(&tx_hash.0),
+				&order.id,
+			)
 			.await
 			.map_err(|e| SolverError::Service(e.to_string()))?;
 
@@ -476,11 +484,15 @@ impl SolverEngine {
 		// Look up order ID and transaction type from the hash
 		if let Ok(order_id) = self
 			.storage
-			.retrieve::<String>("tx_to_order", &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
 			.await
 		{
 			// Determine transaction type from stored transaction hashes
-			if let Ok(order) = self.storage.retrieve::<Order>("orders", &order_id).await {
+			if let Ok(order) = self
+				.storage
+				.retrieve::<Order>(StorageTable::Orders.as_str(), &order_id)
+				.await
+			{
 				let tx_type = if order.prepare_tx_hash.as_ref().map(|h| &h.0) == Some(&tx_hash.0) {
 					TransactionType::Prepare
 				} else if order.fill_tx_hash.as_ref().map(|h| &h.0) == Some(&tx_hash.0) {
@@ -552,7 +564,7 @@ impl SolverEngine {
 		// Look up the order ID from the transaction hash
 		let order_id = match self
 			.storage
-			.retrieve::<String>("tx_to_order", &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
 			.await
 		{
 			Ok(id) => id,
@@ -564,7 +576,7 @@ impl SolverEngine {
 		// Retrieve the full order with execution parameters
 		let order: Order = self
 			.storage
-			.retrieve("orders", &order_id)
+			.retrieve(StorageTable::Orders.as_str(), &order_id)
 			.await
 			.map_err(|e| SolverError::Service(format!("Failed to retrieve order: {}", e)))?;
 
@@ -601,7 +613,7 @@ impl SolverEngine {
 		// Look up the order ID from the transaction hash
 		let order_id = match self
 			.storage
-			.retrieve::<String>("tx_to_order", &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
 			.await
 		{
 			Ok(id) => id,
@@ -611,7 +623,11 @@ impl SolverEngine {
 		};
 
 		// Retrieve the order
-		let order = match self.storage.retrieve::<Order>("orders", &order_id).await {
+		let order = match self
+			.storage
+			.retrieve::<Order>(StorageTable::Orders.as_str(), &order_id)
+			.await
+		{
 			Ok(order) => order,
 			Err(_) => {
 				return Ok(());
@@ -639,7 +655,10 @@ impl SolverEngine {
 			};
 
 			// Store the fill proof - inline the logic from set_order_fill_proof
-			let mut order: Order = match storage.retrieve("orders", &order_id).await {
+			let mut order: Order = match storage
+				.retrieve(StorageTable::Orders.as_str(), &order_id)
+				.await
+			{
 				Ok(order) => order,
 				Err(_) => return,
 			};
@@ -648,7 +667,10 @@ impl SolverEngine {
 				.duration_since(UNIX_EPOCH)
 				.unwrap()
 				.as_secs();
-			if let Err(e) = storage.update("orders", &order_id, &order).await {
+			if let Err(e) = storage
+				.update(StorageTable::Orders.as_str(), &order_id, &order)
+				.await
+			{
 				tracing::error!(
 					order_id = %truncate_id(&order_id),
 					error = %e,
@@ -706,7 +728,7 @@ impl SolverEngine {
 		// Look up the order ID from the transaction hash
 		let order_id = match self
 			.storage
-			.retrieve::<String>("tx_to_order", &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
 			.await
 		{
 			Ok(id) => id,
@@ -751,7 +773,7 @@ impl SolverEngine {
 			// Retrieve order
 			let order: Order = self
 				.storage
-				.retrieve("orders", &order_id)
+				.retrieve(StorageTable::Orders.as_str(), &order_id)
 				.await
 				.map_err(|e| SolverError::Service(e.to_string()))?;
 
@@ -792,7 +814,11 @@ impl SolverEngine {
 
 			// Store reverse mapping: tx_hash -> order_id
 			self.storage
-				.store("tx_to_order", &hex::encode(&claim_tx_hash.0), &order.id)
+				.store(
+					StorageTable::TxToOrder.as_str(),
+					&hex::encode(&claim_tx_hash.0),
+					&order.id,
+				)
 				.await
 				.map_err(|e| SolverError::Service(e.to_string()))?;
 		}
@@ -836,7 +862,7 @@ impl SolverEngine {
 	{
 		let mut order: Order = self
 			.storage
-			.retrieve("orders", order_id)
+			.retrieve(StorageTable::Orders.as_str(), order_id)
 			.await
 			.map_err(|e| SolverError::Service(e.to_string()))?;
 
@@ -850,7 +876,7 @@ impl SolverEngine {
 			.as_secs();
 
 		self.storage
-			.update("orders", &order_id, &order)
+			.update(StorageTable::Orders.as_str(), &order_id, &order)
 			.await
 			.map_err(|e| SolverError::Service(e.to_string()))
 	}
