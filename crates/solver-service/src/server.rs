@@ -9,7 +9,7 @@ use axum::{
 	routing::{get, post},
 	Router,
 };
-use solver_config::ApiConfig;
+use solver_config::{ApiConfig, Config};
 use solver_core::SolverEngine;
 use solver_types::{APIError, GetOrderResponse, GetQuoteRequest, GetQuoteResponse};
 use std::sync::Arc;
@@ -23,6 +23,8 @@ use tracing::{info, warn};
 pub struct AppState {
 	/// Reference to the solver engine for processing requests.
 	pub solver: Arc<SolverEngine>,
+	/// Complete configuration.
+	pub config: Config,
 }
 
 /// Starts the HTTP server for the API.
@@ -30,10 +32,13 @@ pub struct AppState {
 /// This function creates and configures the HTTP server with routing,
 /// middleware, and error handling for the endpoint.
 pub async fn start_server(
-	config: ApiConfig,
+	api_config: ApiConfig,
 	solver: Arc<SolverEngine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-	let app_state = AppState { solver };
+	// Get the full config from the solver engine
+	let config = solver.config().clone();
+
+	let app_state = AppState { solver, config };
 
 	// Build the router with /api base path and quote endpoint
 	let app = Router::new()
@@ -46,7 +51,7 @@ pub async fn start_server(
 		.layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
 		.with_state(app_state);
 
-	let bind_address = format!("{}:{}", config.host, config.port);
+	let bind_address = format!("{}:{}", api_config.host, api_config.port);
 	let listener = TcpListener::bind(&bind_address).await?;
 
 	info!("OIF Solver API server starting on {}", bind_address);
@@ -64,7 +69,7 @@ async fn handle_quote(
 	State(state): State<AppState>,
 	Json(request): Json<GetQuoteRequest>,
 ) -> Result<Json<GetQuoteResponse>, APIError> {
-	match crate::apis::quote::process_quote_request(request, &state.solver).await {
+	match crate::apis::quote::process_quote_request(request, &state.solver, &state.config).await {
 		Ok(response) => Ok(Json(response)),
 		Err(e) => {
 			warn!("Quote request failed: {}", e);
