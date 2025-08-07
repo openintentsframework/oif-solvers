@@ -31,7 +31,7 @@ pub struct TransactionReceipt {
 pub struct ChainData {
 	/// The chain ID.
 	pub chain_id: u64,
-	/// Current gas price as a decimal string in wei.
+	/// Current gas price as a string in wei.
 	pub gas_price: String,
 	/// Latest block number.
 	pub block_number: u64,

@@ -109,7 +109,7 @@ impl SolverEngine {
 						order_id = &intent.id,
 						intent_source = %intent.source,
 						intent_standard = %intent.standard,
-						"Discovered intent from source"
+						"Discovered intent"
 					);
 					self.handle_intent(intent).await?;
 				}

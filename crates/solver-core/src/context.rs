@@ -9,7 +9,7 @@ use solver_delivery::DeliveryService;
 use solver_types::{ExecutionContext, Intent};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::SolverError;
 
@@ -34,19 +34,13 @@ impl ContextBuilder {
     pub async fn build_execution_context(&self, intent: &Intent) -> Result<ExecutionContext, SolverError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(Duration::ZERO)
             .as_secs();
-        tracing::info!(
-            intent_id = %intent.id,
-            standard = %intent.standard,
-            source = %intent.source,
-            "Building execution context for intent"
-        );
         
         // 1. Extract chains involved from the intent data
         let involved_chains = match self.extract_chains_from_intent(intent) {
             Ok(chains) => {
-                tracing::info!(
+                tracing::debug!(
                     intent_id = %intent.id,
                     chains = ?chains,
                     "Successfully extracted chains from intent"
@@ -80,10 +74,6 @@ impl ContextBuilder {
         // 3. Get solver balances for relevant chains/tokens
         let solver_balances = self.fetch_solver_balances(&involved_chains).await?;
 
-        tracing::info!("Built execution context");
-        tracing::info!("Chain data: {:?}", chain_data);
-        tracing::info!("Solver balances: {:?}", solver_balances);
-
         Ok(ExecutionContext {
             chain_data,
             solver_balances,
@@ -102,7 +92,7 @@ impl ContextBuilder {
             "Attempting to extract chains from intent"
         );
 
-        let result = match intent.standard.as_str() {
+        match intent.standard.as_str() {
             "eip7683" => self.extract_eip7683_chains(&intent.data),
             _ => {
                 tracing::warn!(
@@ -110,25 +100,9 @@ impl ContextBuilder {
                     intent_id = %intent.id,
                     "Unsupported intent standard, using fallback chain detection"
                 );
-                // Fallback: try to extract from common fields
-                self.extract_fallback_chains(&intent.data)
+                return Err(SolverError::Service(format!("Unsupported intent standard: {}", intent.standard)));
             }
-        };
-
-        match &result {
-            Ok(chains) => tracing::debug!(
-                intent_id = %intent.id,
-                chains = ?chains,
-                "Chain extraction completed successfully"
-            ),
-            Err(e) => tracing::debug!(
-                intent_id = %intent.id,
-                error = %e,
-                "Chain extraction failed"
-            ),
         }
-
-        result
     }
 
     /// Extracts chain IDs from EIP-7683 intent data.
@@ -207,75 +181,12 @@ impl ContextBuilder {
         chains.dedup();
 
         if chains.is_empty() {
-            // Try fallback extraction before giving up
-            tracing::info!("No chains found in EIP-7683 specific fields, trying fallback extraction");
-            return self.extract_fallback_chains(data);
+            return Err(SolverError::Service(format!("No chains found in EIP-7683 specific fields")));
         }
 
         Ok(chains)
     }
 
-    /// Fallback chain extraction for unknown standards.
-    fn extract_fallback_chains(&self, data: &serde_json::Value) -> Result<Vec<u64>, SolverError> {
-        // Try common field names that might contain chain information
-        let mut chains = Vec::new();
-
-        // Helper function to parse chain ID from either string or number, supporting hex
-        let parse_chain_id = |value: &serde_json::Value| -> Option<u64> {
-            match value {
-                serde_json::Value::Number(n) => n.as_u64(),
-                serde_json::Value::String(s) => {
-                    if s.starts_with("0x") {
-                        // Parse hex string
-                        u64::from_str_radix(&s[2..], 16).ok()
-                    } else {
-                        // Parse decimal string
-                        s.parse::<u64>().ok()
-                    }
-                }
-                _ => None,
-            }
-        };
-
-        // Look for explicit chain_id fields (support both numeric and hex string formats)
-        if let Some(chain_id_value) = data.get("chain_id") {
-            if let Some(chain_id) = parse_chain_id(chain_id_value) {
-                chains.push(chain_id);
-            }
-        }
-
-        // Look for source/destination chain fields
-        if let Some(source_chain_value) = data.get("source_chain_id") {
-            if let Some(source_chain) = parse_chain_id(source_chain_value) {
-                chains.push(source_chain);
-            }
-        }
-        if let Some(dest_chain_value) = data.get("destination_chain_id") {
-            if let Some(dest_chain) = parse_chain_id(dest_chain_value) {
-                chains.push(dest_chain);
-            }
-        }
-
-        // Also check for origin_chain_id which was mentioned in the user's message
-        if let Some(origin_chain_value) = data.get("origin_chain_id") {
-            if let Some(origin_chain) = parse_chain_id(origin_chain_value) {
-                tracing::info!("Found origin_chain_id: {} (parsed as {})", 
-                    origin_chain_value, origin_chain);
-                chains.push(origin_chain);
-            }
-        }
-
-        // Remove duplicates
-        chains.sort_unstable();
-        chains.dedup();
-
-        if chains.is_empty() {
-            // Last resort: return empty chains - this will be handled by the caller
-            tracing::warn!("No chain information found in intent, unable to extract chains");
-        }
-
-        Ok(chains)
-    }
 
     /// Extracts chain ID from ERC-7930 interoperable address format.
     ///
@@ -364,7 +275,7 @@ impl ContextBuilder {
                         balances.insert((chain_id, Some(token_address.clone())), balance);
                     }
                     Err(e) => {
-                        tracing::debug!(
+                        tracing::warn!(
                             chain_id = chain_id,
                             token = %token_address,
                             error = %e,
