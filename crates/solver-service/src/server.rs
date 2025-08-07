@@ -28,6 +28,8 @@ pub struct AppState {
 	pub config: Config,
 	/// HTTP client for forwarding requests.
 	pub http_client: reqwest::Client,
+	/// Discovery service URL for forwarding orders (if configured).
+	pub discovery_url: Option<String>,
 }
 
 /// Starts the HTTP server for the API.
@@ -48,10 +50,34 @@ pub async fn start_server(
 		.timeout(std::time::Duration::from_secs(30))
 		.build()?;
 
+	// Extract discovery service URL once during startup
+	let discovery_url = config
+		.discovery
+		.sources
+		.get("offchain_eip7683")
+		.map(|discovery_config| {
+			let api_host = discovery_config
+				.get("api_host")
+				.and_then(|v| v.as_str())
+				.unwrap_or("127.0.0.1");
+			let api_port = discovery_config
+				.get("api_port")
+				.and_then(|v| v.as_integer())
+				.unwrap_or(8081) as u16;
+			format!("http://{}:{}/intent", api_host, api_port)
+		});
+
+	if let Some(ref url) = discovery_url {
+		tracing::info!("Orders will be forwarded to discovery service at: {}", url);
+	} else {
+		tracing::warn!("No offchain_eip7683 discovery source configured - /orders endpoint will not be available");
+	}
+
 	let app_state = AppState {
 		solver,
 		config,
 		http_client,
+		discovery_url,
 	};
 
 	// Build the router with /api base path and quote endpoint
@@ -119,9 +145,9 @@ async fn handle_order(
 	State(state): State<AppState>,
 	Json(payload): Json<Value>,
 ) -> impl IntoResponse {
-	// Extract the 7683 offchain discovery configuration
-	let discovery_config = match state.config.discovery.sources.get("offchain_eip7683") {
-		Some(config) => config,
+	// Check if discovery URL is configured
+	let forward_url = match &state.discovery_url {
+		Some(url) => url,
 		None => {
 			tracing::warn!("offchain_eip7683 discovery source not configured");
 			return (
@@ -134,27 +160,13 @@ async fn handle_order(
 		}
 	};
 
-	// Extract host and port from the discovery config
-	let api_host = discovery_config
-		.get("api_host")
-		.and_then(|v| v.as_str())
-		.unwrap_or("127.0.0.1");
-
-	let api_port = discovery_config
-		.get("api_port")
-		.and_then(|v| v.as_integer())
-		.unwrap_or(8081) as u16;
-
-	// Construct the forward URL
-	let forward_url = format!("http://{}:{}/intent", api_host, api_port);
-
-	tracing::info!("Forwarding order submission to: {}", forward_url);
+	tracing::debug!("Forwarding order submission to: {}", forward_url);
 
 	// Use the shared HTTP client from app state
 	// Forward the request
 	match state
 		.http_client
-		.post(&forward_url)
+		.post(forward_url)
 		.json(&payload)
 		.send()
 		.await
