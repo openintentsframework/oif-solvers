@@ -17,7 +17,7 @@ mod server;
 use solver_account::implementations::local::create_account;
 use solver_delivery::implementations::evm::alloy::create_http_delivery;
 use solver_discovery::implementations::offchain::_7683::create_discovery as offchain_create_discovery;
-// use solver_discovery::implementations::onchain::_7683::create_discovery as onchain_create_discovery;
+use solver_discovery::implementations::onchain::_7683::create_discovery as onchain_create_discovery;
 use solver_order::implementations::{
 	standards::_7683::create_order_impl, strategies::simple::create_strategy,
 };
@@ -109,6 +109,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
+/// Macro to create a factory HashMap with the appropriate type aliases
+macro_rules! create_factory_map {
+    ($interface:path, $error:path, $( $name:literal => $factory:expr ),* $(,)?) => {{
+        let mut factories = std::collections::HashMap::new();
+        $(
+            factories.insert(
+                $name.to_string(),
+                $factory as fn(&toml::Value) -> Result<Box<dyn $interface>, $error>
+            );
+        )*
+        factories
+    }};
+}
+
 /// Builds the solver engine with all necessary implementations.
 ///
 /// This function wires up all the concrete implementations for:
@@ -122,59 +136,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_solver(config: Config) -> Result<SolverEngine, Box<dyn std::error::Error>> {
 	let builder = SolverBuilder::new(config);
 
-	// Create factory maps with explicit type annotations
-	type DeliveryFactory =
-		fn(
-			&toml::Value,
-		)
-			-> Result<Box<dyn solver_delivery::DeliveryInterface>, solver_delivery::DeliveryError>;
-	let mut delivery_factories: std::collections::HashMap<String, DeliveryFactory> =
-		std::collections::HashMap::new();
-	delivery_factories.insert(
-		"origin".to_string(),
-		create_http_delivery as DeliveryFactory,
-	);
-	delivery_factories.insert(
-		"destination".to_string(),
-		create_http_delivery as DeliveryFactory,
+	// Create factory maps using the macro - much cleaner!
+	let delivery_factories = create_factory_map!(
+		solver_delivery::DeliveryInterface,
+		solver_delivery::DeliveryError,
+		"origin" => create_http_delivery,
+		"destination" => create_http_delivery,
 	);
 
-	type DiscoveryFactory = fn(
-		&toml::Value,
-	) -> Result<
-		Box<dyn solver_discovery::DiscoveryInterface>,
-		solver_discovery::DiscoveryError,
-	>;
-	let mut discovery_factories: std::collections::HashMap<String, DiscoveryFactory> =
-		std::collections::HashMap::new();
 	// Note: Comment out on-chain discovery when using offchain_eip7683
 	//       as it will discover `open` events from `openFor` function and attempt to fill it
-	// discovery_factories.insert(
-	// 	"onchain_eip7683".to_string(),
-	// 	onchain_create_discovery as DiscoveryFactory,
-	// );
-	discovery_factories.insert(
-		"offchain_eip7683".to_string(),
-		offchain_create_discovery as DiscoveryFactory,
+	let discovery_factories = create_factory_map!(
+		solver_discovery::DiscoveryInterface,
+		solver_discovery::DiscoveryError,
+		"onchain_eip7683" => onchain_create_discovery,
+		"offchain_eip7683" => offchain_create_discovery,
 	);
 
-	type OrderFactory =
-		fn(&toml::Value) -> Result<Box<dyn solver_order::OrderInterface>, solver_order::OrderError>;
-	let mut order_factories: std::collections::HashMap<String, OrderFactory> =
-		std::collections::HashMap::new();
-	order_factories.insert("eip7683".to_string(), create_order_impl as OrderFactory);
+	let order_factories = create_factory_map!(
+		solver_order::OrderInterface,
+		solver_order::OrderError,
+		"eip7683" => create_order_impl,
+	);
 
-	type SettlementFactory = fn(
-		&toml::Value,
-	) -> Result<
-		Box<dyn solver_settlement::SettlementInterface>,
+	let settlement_factories = create_factory_map!(
+		solver_settlement::SettlementInterface,
 		solver_settlement::SettlementError,
-	>;
-	let mut settlement_factories: std::collections::HashMap<String, SettlementFactory> =
-		std::collections::HashMap::new();
-	settlement_factories.insert(
-		"eip7683".to_string(),
-		create_settlement as SettlementFactory,
+		"eip7683" => create_settlement,
 	);
 
 	let factories = SolverFactories {

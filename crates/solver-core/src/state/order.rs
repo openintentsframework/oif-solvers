@@ -4,8 +4,10 @@
 //! valid lifecycle states: Created -> Pending -> Executed -> Settled -> Finalized.
 //! Also handles failure states and provides utilities for updating order fields.
 
+use once_cell::sync::Lazy;
 use solver_storage::StorageService;
 use solver_types::{Order, OrderStatus, StorageTable, TransactionType};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -92,32 +94,58 @@ impl OrderStateMachine {
 
 	/// Checks if a state transition is valid
 	fn is_valid_transition(from: &OrderStatus, to: &OrderStatus) -> bool {
-		match (from, to) {
-			// From Created
-			(OrderStatus::Created, OrderStatus::Pending) => true,
-			(OrderStatus::Created, OrderStatus::Failed(_)) => true,
-
-			// From Pending
-			(OrderStatus::Pending, OrderStatus::Executed) => true,
-			(OrderStatus::Pending, OrderStatus::Failed(_)) => true,
-
-			// From Executed
-			(OrderStatus::Executed, OrderStatus::Settled) => true,
-			(OrderStatus::Executed, OrderStatus::Failed(_)) => true,
-
-			// From Settled
-			(OrderStatus::Settled, OrderStatus::Finalized) => true,
-			(OrderStatus::Settled, OrderStatus::Failed(_)) => true,
-
-			// Failed is terminal state - no transitions from it
-			(OrderStatus::Failed(_), _) => false,
-
-			// Finalized is terminal state - no transitions from it
-			(OrderStatus::Finalized, _) => false,
-
-			// All other transitions are invalid
-			_ => false,
+		#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+		enum OrderStatusKind {
+			Created,
+			Pending,
+			Executed,
+			Settled,
+			Finalized,
+			Failed,
 		}
+
+		// Static transition table - each state maps to allowed next states
+		static TRANSITIONS: Lazy<HashMap<OrderStatusKind, HashSet<OrderStatusKind>>> =
+			Lazy::new(|| {
+				let mut m = HashMap::new();
+				m.insert(
+					OrderStatusKind::Created,
+					HashSet::from([OrderStatusKind::Pending, OrderStatusKind::Failed]),
+				);
+				m.insert(
+					OrderStatusKind::Pending,
+					HashSet::from([OrderStatusKind::Executed, OrderStatusKind::Failed]),
+				);
+				m.insert(
+					OrderStatusKind::Executed,
+					HashSet::from([OrderStatusKind::Settled, OrderStatusKind::Failed]),
+				);
+				m.insert(
+					OrderStatusKind::Settled,
+					HashSet::from([OrderStatusKind::Finalized, OrderStatusKind::Failed]),
+				);
+				m.insert(OrderStatusKind::Failed, HashSet::new()); // terminal
+				m.insert(OrderStatusKind::Finalized, HashSet::new()); // terminal
+				m
+			});
+
+		// Helper to convert OrderStatus to OrderStatusKind
+		let status_kind = |status: &OrderStatus| -> OrderStatusKind {
+			match status {
+				OrderStatus::Created => OrderStatusKind::Created,
+				OrderStatus::Pending => OrderStatusKind::Pending,
+				OrderStatus::Executed => OrderStatusKind::Executed,
+				OrderStatus::Settled => OrderStatusKind::Settled,
+				OrderStatus::Finalized => OrderStatusKind::Finalized,
+				OrderStatus::Failed(_) => OrderStatusKind::Failed,
+			}
+		};
+
+		let from_kind = status_kind(from);
+		let to_kind = status_kind(to);
+		TRANSITIONS
+			.get(&from_kind)
+			.is_some_and(|set| set.contains(&to_kind))
 	}
 
 	/// Gets an order by ID
