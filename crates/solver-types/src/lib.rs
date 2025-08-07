@@ -12,8 +12,6 @@ pub mod api;
 pub mod delivery;
 /// Intent discovery types for finding and processing new orders.
 pub mod discovery;
-/// ERC-7930 Interoperable Address types for cross-chain addressing.
-pub mod erc7930;
 /// Event types for inter-service communication.
 pub mod events;
 /// Order processing types including intents, orders, and execution contexts.
@@ -30,9 +28,11 @@ pub use account::*;
 pub use api::*;
 pub use delivery::*;
 pub use discovery::*;
-pub use erc7930::*;
 pub use events::*;
 pub use order::*;
-pub use standards::eip7683::{Eip7683OrderData, Output as Eip7683Output};
+pub use standards::{
+	eip7683::{Eip7683OrderData, Output as Eip7683Output},
+	eip7930::{InteropAddress, InteropAddressError},
+};
 pub use storage::*;
 pub use validation::*;
