@@ -12,7 +12,7 @@ use solver_order::OrderService;
 use solver_storage::StorageService;
 use solver_types::{
 	DeliveryEvent, ExecutionParams, Intent, Order, OrderEvent, OrderStatus, SolverEvent,
-	StorageTable, TransactionType,
+	StorageKey, TransactionType,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -86,7 +86,7 @@ impl OrderHandler {
 			// Store tx_hash -> order_id mapping
 			self.storage
 				.store(
-					StorageTable::TxToOrder.as_str(),
+					StorageKey::OrderByTxHash.as_str(),
 					&hex::encode(&prepare_tx_hash.0),
 					&order.id,
 				)
@@ -161,7 +161,7 @@ impl OrderHandler {
 		// Store reverse mapping: tx_hash -> order_id
 		self.storage
 			.store(
-				StorageTable::TxToOrder.as_str(),
+				StorageKey::OrderByTxHash.as_str(),
 				&hex::encode(&tx_hash.0),
 				&order.id,
 			)

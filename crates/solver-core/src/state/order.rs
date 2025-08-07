@@ -6,7 +6,7 @@
 
 use once_cell::sync::Lazy;
 use solver_storage::StorageService;
-use solver_types::{Order, OrderStatus, StorageTable, TransactionType};
+use solver_types::{Order, OrderStatus, StorageKey, TransactionType};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -45,7 +45,7 @@ impl OrderStateMachine {
 	{
 		let mut order: Order = self
 			.storage
-			.retrieve(StorageTable::Orders.as_str(), order_id)
+			.retrieve(StorageKey::Orders.as_str(), order_id)
 			.await
 			.map_err(|e| OrderStateError::Storage(e.to_string()))?;
 
@@ -59,7 +59,7 @@ impl OrderStateMachine {
 			.as_secs();
 
 		self.storage
-			.update(StorageTable::Orders.as_str(), order_id, &order)
+			.update(StorageKey::Orders.as_str(), order_id, &order)
 			.await
 			.map_err(|e| OrderStateError::Storage(e.to_string()))?;
 
@@ -74,7 +74,7 @@ impl OrderStateMachine {
 	) -> Result<Order, OrderStateError> {
 		let order: Order = self
 			.storage
-			.retrieve(StorageTable::Orders.as_str(), order_id)
+			.retrieve(StorageKey::Orders.as_str(), order_id)
 			.await
 			.map_err(|e| OrderStateError::Storage(e.to_string()))?;
 
@@ -151,7 +151,7 @@ impl OrderStateMachine {
 	/// Gets an order by ID
 	pub async fn get_order(&self, order_id: &str) -> Result<Order, OrderStateError> {
 		self.storage
-			.retrieve(StorageTable::Orders.as_str(), order_id)
+			.retrieve(StorageKey::Orders.as_str(), order_id)
 			.await
 			.map_err(|e| OrderStateError::Storage(e.to_string()))
 	}
@@ -159,7 +159,7 @@ impl OrderStateMachine {
 	/// Stores a new order
 	pub async fn store_order(&self, order: &Order) -> Result<(), OrderStateError> {
 		self.storage
-			.store(StorageTable::Orders.as_str(), &order.id, order)
+			.store(StorageKey::Orders.as_str(), &order.id, order)
 			.await
 			.map_err(|e| OrderStateError::Storage(e.to_string()))
 	}

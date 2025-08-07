@@ -10,7 +10,7 @@ use solver_delivery::DeliveryService;
 use solver_order::OrderService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
-use solver_types::{DeliveryEvent, Order, SolverEvent, StorageTable, TransactionType};
+use solver_types::{DeliveryEvent, Order, SolverEvent, StorageKey, TransactionType};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
@@ -64,7 +64,7 @@ impl SettlementHandler {
 			// Retrieve order
 			let order: Order = self
 				.storage
-				.retrieve(StorageTable::Orders.as_str(), &order_id)
+				.retrieve(StorageKey::Orders.as_str(), &order_id)
 				.await
 				.map_err(|e| SettlementError::Storage(e.to_string()))?;
 
@@ -105,7 +105,7 @@ impl SettlementHandler {
 			// Store reverse mapping: tx_hash -> order_id
 			self.storage
 				.store(
-					StorageTable::TxToOrder.as_str(),
+					StorageKey::OrderByTxHash.as_str(),
 					&hex::encode(&claim_tx_hash.0),
 					&order.id,
 				)

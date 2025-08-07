@@ -9,7 +9,7 @@ use crate::utils::truncate_id;
 use solver_order::OrderService;
 use solver_storage::StorageService;
 use solver_types::{
-	DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageTable,
+	DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageKey,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -70,7 +70,7 @@ impl IntentHandler {
 
 				// Store intent for later use
 				self.storage
-					.store(StorageTable::Intents.as_str(), &order.id, &intent)
+					.store(StorageKey::Intents.as_str(), &order.id, &intent)
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 

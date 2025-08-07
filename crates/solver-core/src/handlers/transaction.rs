@@ -13,7 +13,7 @@ use solver_delivery::DeliveryService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
-	DeliveryEvent, Order, OrderEvent, OrderStatus, SolverEvent, StorageTable, TransactionHash,
+	DeliveryEvent, Order, OrderEvent, OrderStatus, SolverEvent, StorageKey, TransactionHash,
 	TransactionReceipt, TransactionType,
 };
 use std::sync::Arc;
@@ -142,14 +142,14 @@ impl TransactionHandler {
 		// Look up the order ID from the transaction hash
 		let order_id = self
 			.storage
-			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageKey::OrderByTxHash.as_str(), &hex::encode(&tx_hash.0))
 			.await
 			.map_err(|e| TransactionError::Storage(e.to_string()))?;
 
 		// Retrieve the full order with execution parameters
 		let order: Order = self
 			.storage
-			.retrieve(StorageTable::Orders.as_str(), &order_id)
+			.retrieve(StorageKey::Orders.as_str(), &order_id)
 			.await
 			.map_err(|e| TransactionError::Storage(format!("Failed to retrieve order: {}", e)))?;
 
@@ -181,14 +181,14 @@ impl TransactionHandler {
 		// Look up the order ID from the transaction hash
 		let order_id = self
 			.storage
-			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageKey::OrderByTxHash.as_str(), &hex::encode(&tx_hash.0))
 			.await
 			.map_err(|e| TransactionError::Storage(e.to_string()))?;
 
 		// Retrieve the order
 		let order: Order = self
 			.storage
-			.retrieve(StorageTable::Orders.as_str(), &order_id)
+			.retrieve(StorageKey::Orders.as_str(), &order_id)
 			.await
 			.map_err(|e| TransactionError::Storage(e.to_string()))?;
 
@@ -218,7 +218,7 @@ impl TransactionHandler {
 		// Look up the order ID from the transaction hash
 		let order_id = self
 			.storage
-			.retrieve::<String>(StorageTable::TxToOrder.as_str(), &hex::encode(&tx_hash.0))
+			.retrieve::<String>(StorageKey::OrderByTxHash.as_str(), &hex::encode(&tx_hash.0))
 			.await
 			.map_err(|e| TransactionError::Storage(e.to_string()))?;
 
