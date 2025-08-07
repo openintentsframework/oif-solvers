@@ -18,7 +18,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
-use tracing::{info, warn};
 
 /// Shared application state for the API server.
 #[derive(Clone)]
@@ -27,6 +26,8 @@ pub struct AppState {
 	pub solver: Arc<SolverEngine>,
 	/// Complete configuration.
 	pub config: Config,
+	/// HTTP client for forwarding requests.
+	pub http_client: reqwest::Client,
 }
 
 /// Starts the HTTP server for the API.
@@ -40,7 +41,18 @@ pub async fn start_server(
 	// Get the full config from the solver engine
 	let config = solver.config().clone();
 
-	let app_state = AppState { solver, config };
+	// Create a reusable HTTP client with connection pooling
+	let http_client = reqwest::Client::builder()
+		.pool_idle_timeout(std::time::Duration::from_secs(90))
+		.pool_max_idle_per_host(10)
+		.timeout(std::time::Duration::from_secs(30))
+		.build()?;
+
+	let app_state = AppState {
+		solver,
+		config,
+		http_client,
+	};
 
 	// Build the router with /api base path and quote endpoint
 	let app = Router::new()
@@ -57,7 +69,7 @@ pub async fn start_server(
 	let bind_address = format!("{}:{}", api_config.host, api_config.port);
 	let listener = TcpListener::bind(&bind_address).await?;
 
-	info!("OIF Solver API server starting on {}", bind_address);
+	tracing::info!("OIF Solver API server starting on {}", bind_address);
 
 	axum::serve(listener, app).await?;
 
@@ -75,7 +87,7 @@ async fn handle_quote(
 	match crate::apis::quote::process_quote_request(request, &state.solver, &state.config).await {
 		Ok(response) => Ok(Json(response)),
 		Err(e) => {
-			warn!("Quote request failed: {}", e);
+			tracing::warn!("Quote request failed: {}", e);
 			Err(APIError::from(e))
 		}
 	}
@@ -92,7 +104,7 @@ async fn handle_get_order_by_id(
 	match crate::apis::order::get_order_by_id(Path(id), &state.solver).await {
 		Ok(response) => Ok(Json(response)),
 		Err(e) => {
-			warn!("Order retrieval failed: {}", e);
+			tracing::warn!("Order retrieval failed: {}", e);
 			Err(APIError::from(e))
 		}
 	}
@@ -111,7 +123,7 @@ async fn handle_order(
 	let discovery_config = match state.config.discovery.sources.get("offchain_eip7683") {
 		Some(config) => config,
 		None => {
-			warn!("offchain_eip7683 discovery source not configured");
+			tracing::warn!("offchain_eip7683 discovery source not configured");
 			return (
 				StatusCode::SERVICE_UNAVAILABLE,
 				Json(serde_json::json!({
@@ -136,13 +148,17 @@ async fn handle_order(
 	// Construct the forward URL
 	let forward_url = format!("http://{}:{}/intent", api_host, api_port);
 
-	info!("Forwarding order submission to: {}", forward_url);
+	tracing::info!("Forwarding order submission to: {}", forward_url);
 
-	// Create HTTP client for forwarding
-	let client = reqwest::Client::new();
-
+	// Use the shared HTTP client from app state
 	// Forward the request
-	match client.post(&forward_url).json(&payload).send().await {
+	match state
+		.http_client
+		.post(&forward_url)
+		.json(&payload)
+		.send()
+		.await
+	{
 		Ok(response) => {
 			let status = response.status();
 			match response.json::<Value>().await {
@@ -153,7 +169,7 @@ async fn handle_order(
 					(axum_status, Json(body)).into_response()
 				}
 				Err(e) => {
-					warn!("Failed to parse response from discovery API: {}", e);
+					tracing::warn!("Failed to parse response from discovery API: {}", e);
 					(
 						StatusCode::BAD_GATEWAY,
 						Json(serde_json::json!({
@@ -165,7 +181,7 @@ async fn handle_order(
 			}
 		}
 		Err(e) => {
-			warn!("Failed to forward request to discovery API: {}", e);
+			tracing::warn!("Failed to forward request to discovery API: {}", e);
 			(
 				StatusCode::BAD_GATEWAY,
 				Json(serde_json::json!({
