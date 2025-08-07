@@ -15,9 +15,10 @@ use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
 	DeliveryEvent, DiscoveryEvent, ExecutionContext, ExecutionDecision, Intent, Order, OrderEvent,
-	OrderStatus, SettlementEvent, SolverEvent, StorageTable, TransactionType,
+	OrderStatus, SettlementEvent, SolverEvent, StorageTable, TransactionType, 
 };
 use crate::context::ContextBuilder;
+use crate::event_bus::EventBus;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
