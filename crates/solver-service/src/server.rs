@@ -5,10 +5,12 @@
 
 use axum::{
 	extract::{Path, State},
-	response::Json,
+	http::StatusCode,
+	response::{IntoResponse, Json},
 	routing::{get, post},
 	Router,
 };
+use serde_json::Value;
 use solver_config::{ApiConfig, Config};
 use solver_core::SolverEngine;
 use solver_types::{APIError, GetOrderResponse, GetQuoteRequest, GetQuoteResponse};
@@ -45,8 +47,9 @@ pub async fn start_server(
 		.nest(
 			"/api",
 			Router::new()
-				.route("/quote", post(handle_quote))
-				.route("/order/{id}", get(handle_get_order_by_id)),
+				.route("/quotes", post(handle_quote))
+				.route("/orders", post(handle_order))
+				.route("/orders/{id}", get(handle_get_order_by_id)),
 		)
 		.layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
 		.with_state(app_state);
@@ -61,7 +64,7 @@ pub async fn start_server(
 	Ok(())
 }
 
-/// Handles POST /api/quote requests.
+/// Handles POST /api/quotes requests.
 ///
 /// This endpoint processes quote requests and returns price estimates
 /// for cross-chain intents following the ERC-7683 standard.
@@ -78,7 +81,7 @@ async fn handle_quote(
 	}
 }
 
-/// Handles GET /api/order/{id} requests.
+/// Handles GET /api/orders/{id} requests.
 ///
 /// This endpoint retrieves order details by ID, providing status information
 /// and execution details for cross-chain intent orders.
@@ -91,6 +94,85 @@ async fn handle_get_order_by_id(
 		Err(e) => {
 			warn!("Order retrieval failed: {}", e);
 			Err(APIError::from(e))
+		}
+	}
+}
+
+/// Handles POST /api/orders requests.
+///
+/// This endpoint forwards intent submission requests to the 7683 discovery API.
+/// It acts as a proxy to maintain a consistent API surface where /orders
+/// is the standard endpoint for intent submission across different solver implementations.
+async fn handle_order(
+	State(state): State<AppState>,
+	Json(payload): Json<Value>,
+) -> impl IntoResponse {
+	// Extract the 7683 offchain discovery configuration
+	let discovery_config = match state.config.discovery.sources.get("offchain_eip7683") {
+		Some(config) => config,
+		None => {
+			warn!("offchain_eip7683 discovery source not configured");
+			return (
+				StatusCode::SERVICE_UNAVAILABLE,
+				Json(serde_json::json!({
+					"error": "Intent submission service not configured"
+				})),
+			)
+				.into_response();
+		}
+	};
+
+	// Extract host and port from the discovery config
+	let api_host = discovery_config
+		.get("api_host")
+		.and_then(|v| v.as_str())
+		.unwrap_or("127.0.0.1");
+
+	let api_port = discovery_config
+		.get("api_port")
+		.and_then(|v| v.as_integer())
+		.unwrap_or(8081) as u16;
+
+	// Construct the forward URL
+	let forward_url = format!("http://{}:{}/intent", api_host, api_port);
+
+	info!("Forwarding order submission to: {}", forward_url);
+
+	// Create HTTP client for forwarding
+	let client = reqwest::Client::new();
+
+	// Forward the request
+	match client.post(&forward_url).json(&payload).send().await {
+		Ok(response) => {
+			let status = response.status();
+			match response.json::<Value>().await {
+				Ok(body) => {
+					// Convert reqwest status to axum status
+					let axum_status = StatusCode::from_u16(status.as_u16())
+						.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+					(axum_status, Json(body)).into_response()
+				}
+				Err(e) => {
+					warn!("Failed to parse response from discovery API: {}", e);
+					(
+						StatusCode::BAD_GATEWAY,
+						Json(serde_json::json!({
+							"error": "Invalid response from discovery service"
+						})),
+					)
+						.into_response()
+				}
+			}
+		}
+		Err(e) => {
+			warn!("Failed to forward request to discovery API: {}", e);
+			(
+				StatusCode::BAD_GATEWAY,
+				Json(serde_json::json!({
+					"error": format!("Failed to submit intent: {}", e)
+				})),
+			)
+				.into_response()
 		}
 	}
 }
