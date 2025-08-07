@@ -149,7 +149,7 @@ pub enum OrderStatus {
 	Pending,
 	/// Order has been executed.
 	Executed,
-	/// Order has been settled and is ready to claim.
+	/// Order has been settled and is ready to be claimed.
 	Settled,
 	/// Order is finalized and complete (after claim confirmation).
 	Finalized,
