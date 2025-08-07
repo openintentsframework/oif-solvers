@@ -338,13 +338,14 @@ strategy_type = "simple"
 max_gas_price_gwei = 100
 
 [settlement]
+[settlement.domain]
+# Domain configuration for EIP-712 signatures in quotes
+chain_id = 1  # Ethereum mainnet
+address = "$INPUT_SETTLER"
 [settlement.implementations.eip7683]
 rpc_url = "http://localhost:$DEST_PORT"
 oracle_address = "$ORACLE"
 dispute_period_seconds = 1
-# Domain configuration for EIP-712 signatures in quotes
-domain_chain_id = 1  # Ethereum mainnet
-domain_address = "$INPUT_SETTLER"
 
 # API server configuration
 [api]
