@@ -76,10 +76,10 @@ fn default_monitoring_timeout_minutes() -> u64 {
 /// Configuration for the storage backend.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StorageConfig {
-	/// The type of storage backend to use (e.g., "memory", "redis", "postgres").
-	pub backend: String,
-	/// Backend-specific configuration parameters as raw TOML values.
-	pub config: toml::Value,
+	/// Which implementation to use as primary.
+	pub primary: String,
+	/// Map of storage implementation names to their configurations.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for delivery mechanisms.
@@ -236,10 +236,25 @@ impl Config {
 		}
 
 		// Validate storage config
-		if self.storage.backend.is_empty() {
+		if self.storage.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"Storage backend cannot be empty".into(),
+				"At least one storage implementation must be configured".into(),
 			));
+		}
+		if self.storage.primary.is_empty() {
+			return Err(ConfigError::Validation(
+				"Storage primary implementation cannot be empty".into(),
+			));
+		}
+		if !self
+			.storage
+			.implementations
+			.contains_key(&self.storage.primary)
+		{
+			return Err(ConfigError::Validation(format!(
+				"Primary storage '{}' not found in implementations",
+				self.storage.primary
+			)));
 		}
 
 		// Validate delivery config

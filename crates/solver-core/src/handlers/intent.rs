@@ -62,15 +62,15 @@ impl IntentHandler {
 					}))
 					.ok();
 
-				// Store order
-				self.state_machine
-					.store_order(&order)
+				// Store intent for deduplication
+				self.storage
+					.store(StorageKey::Intents.as_str(), &order.id, &intent)
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 
-				// Store intent for later use
-				self.storage
-					.store(StorageKey::Intents.as_str(), &order.id, &intent)
+				// Store order
+				self.state_machine
+					.store_order(&order)
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 

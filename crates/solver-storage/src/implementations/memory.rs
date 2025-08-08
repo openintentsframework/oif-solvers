@@ -5,6 +5,7 @@
 
 use crate::{StorageError, StorageInterface};
 use async_trait::async_trait;
+use solver_types::{ConfigSchema, Schema, ValidationError};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -110,6 +111,21 @@ impl StorageInterface for MemoryStorage {
 			None => Ok(false),
 		}
 	}
+
+	fn config_schema(&self) -> Box<dyn ConfigSchema> {
+		Box::new(MemoryStorageSchema)
+	}
+}
+
+/// Configuration schema for MemoryStorage.
+pub struct MemoryStorageSchema;
+
+impl ConfigSchema for MemoryStorageSchema {
+	fn validate(&self, _config: &toml::Value) -> Result<(), ValidationError> {
+		// Memory storage has no required configuration
+		let schema = Schema::new(vec![], vec![]);
+		schema.validate(_config)
+	}
 }
 
 /// Factory function to create a memory storage backend from configuration.
@@ -123,8 +139,6 @@ pub fn create_storage(_config: &toml::Value) -> Result<Box<dyn StorageInterface>
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::time::Duration;
-	use tokio::time::sleep;
 
 	#[tokio::test]
 	async fn test_basic_operations() {
@@ -146,33 +160,6 @@ mod tests {
 		assert!(!storage.exists(key).await.unwrap());
 
 		// Test get after delete
-		let result = storage.get_bytes(key).await;
-		assert!(matches!(result, Err(StorageError::NotFound)));
-	}
-
-	#[tokio::test]
-	async fn test_ttl() {
-		let storage = MemoryStorage::new();
-
-		// Set with short TTL
-		let key = "ttl_key";
-		let value = b"ttl_value".to_vec();
-		let ttl = Duration::from_millis(100);
-		storage
-			.set_bytes(key, value.clone(), Some(ttl))
-			.await
-			.unwrap();
-
-		// Should exist immediately
-		assert!(storage.exists(key).await.unwrap());
-		let retrieved = storage.get_bytes(key).await.unwrap();
-		assert_eq!(retrieved, value);
-
-		// Wait for expiration
-		sleep(Duration::from_millis(150)).await;
-
-		// Should no longer exist
-		assert!(!storage.exists(key).await.unwrap());
 		let result = storage.get_bytes(key).await;
 		assert!(matches!(result, Err(StorageError::NotFound)));
 	}

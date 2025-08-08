@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
+use solver_types::ConfigSchema;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -52,6 +53,9 @@ pub trait StorageInterface: Send + Sync {
 
 	/// Checks if a key exists in storage.
 	async fn exists(&self, key: &str) -> Result<bool, StorageError>;
+
+	/// Returns the configuration schema for validation.
+	fn config_schema(&self) -> Box<dyn ConfigSchema>;
 }
 
 /// High-level storage service that provides typed operations.
@@ -96,10 +100,8 @@ impl StorageService {
 		id: &str,
 		data: &T,
 	) -> Result<(), StorageError> {
-		let key = format!("{}:{}", namespace, id);
-		let bytes =
-			serde_json::to_vec(data).map_err(|e| StorageError::Serialization(e.to_string()))?;
-		self.backend.set_bytes(&key, bytes, None).await
+		self.store_with_ttl(namespace, id, data, Some(Duration::ZERO))
+			.await
 	}
 
 	/// Retrieves and deserializes a value from storage.
