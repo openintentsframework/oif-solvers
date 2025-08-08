@@ -114,7 +114,7 @@ approve_permit2
 # Build StandardOrder data
 build_order_data() {
     CURRENT_TIME=$(date +%s)
-    #Use milliseconds for nonce to avoid collisions when sending multiple intents quickly
+    # Use milliseconds for nonce to avoid collisions when sending multiple intents quickly
     NONCE=$(perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000')
     FILL_DEADLINE=$((CURRENT_TIME + 3600))  # 1 hour
     EXPIRY=$FILL_DEADLINE
