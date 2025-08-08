@@ -210,22 +210,37 @@ impl FileStorage {
 			if path.extension() == Some(std::ffi::OsStr::new("bin")) {
 				// Read just the header (first 64 bytes)
 				match fs::read(&path).await {
-					Ok(data) if data.len() >= FileHeader::SIZE => {
-						if let Ok(header) = FileHeader::deserialize(&data[..FileHeader::SIZE]) {
-							if header.is_expired() {
-								if let Err(e) = fs::remove_file(&path).await {
-									tracing::warn!(
-										"Failed to remove expired file {:?}: {}",
-										path,
-										e
-									);
-								} else {
-									removed += 1;
+					Ok(data) => {
+						if data.len() >= FileHeader::SIZE {
+							if let Ok(header) = FileHeader::deserialize(&data[..FileHeader::SIZE]) {
+								if header.is_expired() {
+									if let Err(e) = fs::remove_file(&path).await {
+										tracing::warn!(
+											"Failed to remove expired file {:?}: {}",
+											path,
+											e
+										);
+									} else {
+										removed += 1;
+									}
 								}
 							}
+						} else {
+							tracing::debug!(
+								"Skipping file {:?}: too small ({} bytes, expected at least {})",
+								path,
+								data.len(),
+								FileHeader::SIZE
+							);
 						}
 					}
-					_ => {} // Skip files that can't be read or are too small
+					Err(e) => {
+						tracing::debug!(
+							"Skipping file {:?}: could not be read: {}",
+							path,
+							e
+						);
+					}
 				}
 			}
 		}
