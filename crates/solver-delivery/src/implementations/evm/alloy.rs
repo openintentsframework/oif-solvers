@@ -141,12 +141,7 @@ impl DeliveryInterface for AlloyDelivery {
 		// Get the transaction hash
 		let tx_hash = *pending_tx.tx_hash();
 		let hash_str = hex::encode(tx_hash.0);
-		let truncated = if hash_str.len() <= 8 {
-			hash_str.clone()
-		} else {
-			format!("{}..", &hash_str[..8])
-		};
-		tracing::info!(tx_hash = %truncated, "Submitted transaction");
+		tracing::info!(tx_hash = %hash_str, "Submitted transaction");
 
 		Ok(TransactionHash(tx_hash.0.to_vec()))
 	}

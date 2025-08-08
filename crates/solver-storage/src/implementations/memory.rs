@@ -8,25 +8,17 @@ use async_trait::async_trait;
 use solver_types::{ConfigSchema, Schema, ValidationError};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
-
-/// Entry in the memory storage with optional expiration.
-#[derive(Clone)]
-struct MemoryEntry {
-	/// The stored data.
-	data: Vec<u8>,
-	/// Optional expiration time.
-	expires_at: Option<Instant>,
-}
 
 /// In-memory storage implementation.
 ///
 /// This implementation stores data in a HashMap in memory,
 /// providing fast access but no persistence across restarts.
+/// TTL is ignored as this is primarily for testing.
 pub struct MemoryStorage {
 	/// The in-memory store protected by a read-write lock.
-	store: Arc<RwLock<HashMap<String, MemoryEntry>>>,
+	store: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl MemoryStorage {
@@ -35,15 +27,6 @@ impl MemoryStorage {
 		Self {
 			store: Arc::new(RwLock::new(HashMap::new())),
 		}
-	}
-
-	/// Removes expired entries from the store.
-	///
-	/// This is called internally during operations to clean up expired data.
-	async fn cleanup_expired(&self) {
-		let now = Instant::now();
-		let mut store = self.store.write().await;
-		store.retain(|_, entry| entry.expires_at.is_none() || entry.expires_at.unwrap() > now);
 	}
 }
 
@@ -56,38 +39,22 @@ impl Default for MemoryStorage {
 #[async_trait]
 impl StorageInterface for MemoryStorage {
 	async fn get_bytes(&self, key: &str) -> Result<Vec<u8>, StorageError> {
-		// Clean up expired entries periodically
-		self.cleanup_expired().await;
-
 		let store = self.store.read().await;
-		match store.get(key) {
-			Some(entry) => {
-				// Check if entry has expired
-				if let Some(expires_at) = entry.expires_at {
-					if expires_at <= Instant::now() {
-						return Err(StorageError::NotFound);
-					}
-				}
-				Ok(entry.data.clone())
-			}
-			None => Err(StorageError::NotFound),
-		}
+		store
+			.get(key)
+			.map(|data| data.clone())
+			.ok_or(StorageError::NotFound)
 	}
 
 	async fn set_bytes(
 		&self,
 		key: &str,
 		value: Vec<u8>,
-		ttl: Option<Duration>,
+		_ttl: Option<Duration>,
 	) -> Result<(), StorageError> {
-		let expires_at = ttl.map(|duration| Instant::now() + duration);
-		let entry = MemoryEntry {
-			data: value,
-			expires_at,
-		};
-
+		// TTL is ignored for memory storage
 		let mut store = self.store.write().await;
-		store.insert(key.to_string(), entry);
+		store.insert(key.to_string(), value);
 		Ok(())
 	}
 
@@ -99,17 +66,7 @@ impl StorageInterface for MemoryStorage {
 
 	async fn exists(&self, key: &str) -> Result<bool, StorageError> {
 		let store = self.store.read().await;
-		match store.get(key) {
-			Some(entry) => {
-				// Check if entry has expired
-				if let Some(expires_at) = entry.expires_at {
-					Ok(expires_at > Instant::now())
-				} else {
-					Ok(true)
-				}
-			}
-			None => Ok(false),
-		}
+		Ok(store.contains_key(key))
 	}
 
 	fn config_schema(&self) -> Box<dyn ConfigSchema> {

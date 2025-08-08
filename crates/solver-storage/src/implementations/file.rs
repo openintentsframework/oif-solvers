@@ -193,6 +193,44 @@ impl FileStorage {
 			.map(|sk| self.ttl_config.get_ttl(sk))
 			.unwrap_or(Duration::ZERO)
 	}
+
+	/// Removes all expired files from storage
+	async fn cleanup_expired_files(&self) -> Result<usize, StorageError> {
+		let mut removed = 0;
+		let mut entries = fs::read_dir(&self.base_path)
+			.await
+			.map_err(|e| StorageError::Backend(e.to_string()))?;
+
+		while let Some(entry) = entries
+			.next_entry()
+			.await
+			.map_err(|e| StorageError::Backend(e.to_string()))?
+		{
+			let path = entry.path();
+			if path.extension() == Some(std::ffi::OsStr::new("bin")) {
+				// Read just the header (first 64 bytes)
+				match fs::read(&path).await {
+					Ok(data) if data.len() >= FileHeader::SIZE => {
+						if let Ok(header) = FileHeader::deserialize(&data[..FileHeader::SIZE]) {
+							if header.is_expired() {
+								if let Err(e) = fs::remove_file(&path).await {
+									tracing::warn!(
+										"Failed to remove expired file {:?}: {}",
+										path,
+										e
+									);
+								} else {
+									removed += 1;
+								}
+							}
+						}
+					}
+					_ => {} // Skip files that can't be read or are too small
+				}
+			}
+		}
+		Ok(removed)
+	}
 }
 
 #[async_trait]
@@ -287,6 +325,10 @@ impl StorageInterface for FileStorage {
 
 	fn config_schema(&self) -> Box<dyn ConfigSchema> {
 		Box::new(FileStorageSchema)
+	}
+
+	async fn cleanup_expired(&self) -> Result<usize, StorageError> {
+		self.cleanup_expired_files().await
 	}
 }
 

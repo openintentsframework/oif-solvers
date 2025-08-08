@@ -102,7 +102,6 @@ impl IntentHandler {
 				let context = ContextBuilder::build().await;
 				match self.order_service.should_execute(&order, &context).await {
 					ExecutionDecision::Execute(params) => {
-						tracing::info!("Preparing order for execution");
 						self.event_bus
 							.publish(SolverEvent::Order(OrderEvent::Preparing {
 								intent: intent.clone(),

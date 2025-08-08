@@ -18,6 +18,7 @@ use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -143,6 +144,25 @@ impl SolverEngine {
 		// Batch claim processing
 		let mut claim_batch = Vec::new();
 
+		// Start storage cleanup task (runs every hour)
+		let storage = self.storage.clone();
+		let cleanup_interval = tokio::time::interval(Duration::from_secs(3600));
+		let cleanup_handle = tokio::spawn(async move {
+			let mut interval = cleanup_interval;
+			loop {
+				interval.tick().await;
+				match storage.cleanup_expired().await {
+					Ok(count) if count > 0 => {
+						tracing::debug!("Storage cleanup: removed {} expired entries", count);
+					}
+					Err(e) => {
+						tracing::warn!("Storage cleanup failed: {}", e);
+					}
+					_ => {} // No expired entries
+				}
+			}
+		});
+
 		loop {
 			tokio::select! {
 				// Handle discovered intents
@@ -203,6 +223,8 @@ impl SolverEngine {
 		}
 
 		// Cleanup
+		cleanup_handle.abort(); // Stop the cleanup task
+
 		self.discovery
 			.stop_all()
 			.await

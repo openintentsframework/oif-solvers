@@ -81,7 +81,6 @@ impl SettlementMonitor {
 
 			// Check if we can claim
 			if settlement.can_claim(&order, &fill_proof).await {
-				tracing::info!(order_id = %truncate_id(&order.id), "Ready to claim");
 				self.event_bus
 					.publish(SolverEvent::Settlement(SettlementEvent::ClaimReady {
 						order_id: order.id,

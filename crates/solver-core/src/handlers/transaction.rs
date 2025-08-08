@@ -231,9 +231,6 @@ impl TransactionHandler {
 			.await
 			.map_err(|e| TransactionError::State(e.to_string()))?;
 
-		// Emit completed event
-		tracing::info!(order_id = %truncate_id(&order_id), "Completed");
-
 		// Publish completed event
 		self.event_bus
 			.publish(SolverEvent::Settlement(
