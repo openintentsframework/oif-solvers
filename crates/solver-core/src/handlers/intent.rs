@@ -6,12 +6,12 @@
 use crate::engine::{context::ContextBuilder, event_bus::EventBus};
 use crate::state::OrderStateMachine;
 use crate::utils::truncate_id;
-use solver_order::OrderService;
-use solver_storage::StorageService;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
+use solver_order::OrderService;
+use solver_storage::StorageService;
 use solver_types::{
-	DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageKey,
+	Address, DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageKey,
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -32,26 +32,29 @@ pub struct IntentHandler {
 	storage: Arc<StorageService>,
 	state_machine: Arc<OrderStateMachine>,
 	event_bus: EventBus,
-    delivery: Arc<DeliveryService>,
-    config: Config,
+	delivery: Arc<DeliveryService>,
+	solver_address: Address,
+	config: Config,
 }
 
 impl IntentHandler {
-    pub fn new(
-        order_service: Arc<OrderService>,
-        storage: Arc<StorageService>,
-        state_machine: Arc<OrderStateMachine>,
-        event_bus: EventBus,
-        delivery: Arc<DeliveryService>,
-        config: Config,
-    ) -> Self {
+	pub fn new(
+		order_service: Arc<OrderService>,
+		storage: Arc<StorageService>,
+		state_machine: Arc<OrderStateMachine>,
+		event_bus: EventBus,
+		delivery: Arc<DeliveryService>,
+		solver_address: Address,
+		config: Config,
+	) -> Self {
 		Self {
 			order_service,
 			storage,
 			state_machine,
 			event_bus,
-            delivery,
-            config,
+			delivery,
+			solver_address,
+			config,
 		}
 	}
 
@@ -61,7 +64,11 @@ impl IntentHandler {
 		tracing::info!("Discovered intent");
 
 		// Validate intent
-		match self.order_service.validate_intent(&intent).await {
+		match self
+			.order_service
+			.validate_intent(&intent, &self.solver_address)
+			.await
+		{
 			Ok(order) => {
 				self.event_bus
 					.publish(SolverEvent::Discovery(DiscoveryEvent::IntentValidated {
@@ -82,13 +89,17 @@ impl IntentHandler {
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 
-                // Check execution strategy
-                let builder = ContextBuilder::new(self.delivery.clone(), self.config.clone());
-                let context = builder
-                    .build_execution_context(&intent)
-                    .await
-                    .map_err(|e| IntentError::Service(e.to_string()))?;
-                match self.order_service.should_execute(&order, &context).await {
+				// Check execution strategy
+				let builder = ContextBuilder::new(
+					self.delivery.clone(),
+					self.solver_address.clone(),
+					self.config.clone(),
+				);
+				let context = builder
+					.build_execution_context(&intent)
+					.await
+					.map_err(|e| IntentError::Service(e.to_string()))?;
+				match self.order_service.should_execute(&order, &context).await {
 					ExecutionDecision::Execute(params) => {
 						tracing::info!("Preparing order for execution");
 						self.event_bus

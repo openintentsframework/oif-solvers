@@ -7,7 +7,7 @@ use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{AssetAmount, ChainData, SettlementType, TransactionHash, TransactionType};
+use crate::{Address, AssetAmount, ChainData, SettlementType, TransactionHash, TransactionType};
 
 /// Represents a validated cross-chain order with execution state.
 ///
@@ -27,6 +27,8 @@ pub struct Order {
 	pub status: OrderStatus,
 	/// Standard-specific order data in JSON format.
 	pub data: serde_json::Value,
+	/// The solver's address for this order (for reward attribution).
+	pub solver_address: Address,
 	/// Quote ID associated with this order.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub quote_id: Option<String>,

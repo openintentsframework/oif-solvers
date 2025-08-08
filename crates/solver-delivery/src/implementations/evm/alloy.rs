@@ -250,7 +250,8 @@ impl DeliveryInterface for AlloyDelivery {
 	}
 
 	async fn get_gas_price(&self) -> Result<String, DeliveryError> {
-		let gas_price = self.provider
+		let gas_price = self
+			.provider
 			.get_gas_price()
 			.await
 			.map_err(|e| DeliveryError::Network(format!("Failed to get gas price: {}", e)))?;
@@ -258,7 +259,11 @@ impl DeliveryInterface for AlloyDelivery {
 		Ok(gas_price.to_string())
 	}
 
-	async fn get_balance(&self, address: &str, token: Option<&str>) -> Result<String, DeliveryError> {
+	async fn get_balance(
+		&self,
+		address: &str,
+		token: Option<&str>,
+	) -> Result<String, DeliveryError> {
 		let address: Address = address
 			.parse()
 			.map_err(|e| DeliveryError::Network(format!("Invalid address: {}", e)))?;
@@ -266,11 +271,11 @@ impl DeliveryInterface for AlloyDelivery {
 		match token {
 			None => {
 				// Get native token balance
-				let balance = self.provider
-					.get_balance(address)
-					.await
-					.map_err(|e| DeliveryError::Network(format!("Failed to get balance: {}", e)))?;
-				
+				let balance =
+					self.provider.get_balance(address).await.map_err(|e| {
+						DeliveryError::Network(format!("Failed to get balance: {}", e))
+					})?;
+
 				Ok(balance.to_string())
 			}
 			Some(token_address) => {

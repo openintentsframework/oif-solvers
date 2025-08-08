@@ -6,7 +6,9 @@
 
 use async_trait::async_trait;
 use solver_account::AccountService;
-use solver_types::{ChainData, ConfigSchema, Signature, Transaction, TransactionHash, TransactionReceipt};
+use solver_types::{
+	ChainData, ConfigSchema, Signature, Transaction, TransactionHash, TransactionReceipt,
+};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -84,7 +86,11 @@ pub trait DeliveryInterface: Send + Sync {
 	/// For native tokens, pass None for the token parameter.
 	/// For ERC-20 tokens, pass the contract address as Some(address).
 	/// Returns the balance as a decimal string.
-	async fn get_balance(&self, address: &str, token: Option<&str>) -> Result<String, DeliveryError>;
+	async fn get_balance(
+		&self,
+		address: &str,
+		token: Option<&str>,
+	) -> Result<String, DeliveryError>;
 
 	/// Gets the current nonce for an address.
 	///
@@ -239,7 +245,7 @@ impl DeliveryService {
 			block_number,
 			timestamp: std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
-				.unwrap()
+				.unwrap_or_default()
 				.as_secs(),
 		})
 	}

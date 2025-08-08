@@ -10,13 +10,14 @@ pub mod lifecycle;
 
 use crate::handlers::{IntentHandler, OrderHandler, SettlementHandler, TransactionHandler};
 use crate::state::OrderStateMachine;
+use solver_account::AccountService;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_discovery::DiscoveryService;
 use solver_order::OrderService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
-use solver_types::{DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
+use solver_types::{Address, DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -37,6 +38,9 @@ pub struct SolverEngine {
 	pub(crate) config: Config,
 	/// Storage service for persisting state.
 	pub(crate) storage: Arc<StorageService>,
+	/// Account service for address and signing operations.
+	#[allow(dead_code)]
+	pub(crate) account: Arc<AccountService>,
 	/// Delivery service for blockchain transactions.
 	#[allow(dead_code)]
 	pub(crate) delivery: Arc<DeliveryService>,
@@ -68,9 +72,12 @@ static CLAIM_BATCH: usize = 1;
 
 impl SolverEngine {
 	/// Creates a new solver engine with the given services
+	#[allow(clippy::too_many_arguments)]
 	pub fn new(
 		config: Config,
 		storage: Arc<StorageService>,
+		account: Arc<AccountService>,
+		solver_address: Address,
 		delivery: Arc<DeliveryService>,
 		discovery: Arc<DiscoveryService>,
 		order: Arc<OrderService>,
@@ -85,6 +92,7 @@ impl SolverEngine {
 			state_machine.clone(),
 			event_bus.clone(),
 			delivery.clone(),
+			solver_address,
 			config.clone(),
 		));
 
@@ -117,6 +125,7 @@ impl SolverEngine {
 		Self {
 			config,
 			storage,
+			account,
 			delivery,
 			discovery,
 			order,
