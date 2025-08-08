@@ -325,6 +325,7 @@ monitoring_timeout_minutes = 5
 
 [storage]
 primary = "file"
+cleanup_interval_seconds = 3600
 
 [storage.implementations.memory]
 # Memory storage has no configuration

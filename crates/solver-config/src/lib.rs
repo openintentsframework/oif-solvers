@@ -80,6 +80,8 @@ pub struct StorageConfig {
 	pub primary: String,
 	/// Map of storage implementation names to their configurations.
 	pub implementations: HashMap<String, toml::Value>,
+	/// Interval in seconds for cleaning up expired storage entries.
+	pub cleanup_interval_seconds: u64,
 }
 
 /// Configuration for delivery mechanisms.
@@ -255,6 +257,16 @@ impl Config {
 				"Primary storage '{}' not found in implementations",
 				self.storage.primary
 			)));
+		}
+		if self.storage.cleanup_interval_seconds == 0 {
+			return Err(ConfigError::Validation(
+				"Storage cleanup_interval_seconds must be greater than 0".into(),
+			));
+		}
+		if self.storage.cleanup_interval_seconds > 86400 {
+			return Err(ConfigError::Validation(
+				"Storage cleanup_interval_seconds cannot exceed 86400 (24 hours)".into(),
+			));
 		}
 
 		// Validate delivery config

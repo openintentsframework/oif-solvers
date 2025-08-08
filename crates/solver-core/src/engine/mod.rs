@@ -144,9 +144,11 @@ impl SolverEngine {
 		// Batch claim processing
 		let mut claim_batch = Vec::new();
 
-		// Start storage cleanup task (runs every hour)
+		// Start storage cleanup task
 		let storage = self.storage.clone();
-		let cleanup_interval = tokio::time::interval(Duration::from_secs(3600));
+		let cleanup_interval = tokio::time::interval(Duration::from_secs(
+			self.config.storage.cleanup_interval_seconds,
+		));
 		let cleanup_handle = tokio::spawn(async move {
 			let mut interval = cleanup_interval;
 			loop {
