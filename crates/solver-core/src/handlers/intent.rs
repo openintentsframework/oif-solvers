@@ -59,12 +59,12 @@ impl IntentHandler {
 		//
 		// By checking if the intent already exists in storage, we ensure each order is only
 		// processed once, regardless of which discovery module receives it first.
-		if self
+		let exists = self
 			.storage
 			.exists(StorageKey::Intents.as_str(), &intent.id)
 			.await
-			.unwrap_or(false)
-		{
+			.map_err(|e| IntentError::Storage(format!("Failed to check intent existence: {}", e)))?;
+		if exists {
 			tracing::debug!(
 				"Intent ({}) already exists, skipping duplicate processing",
 				truncate_id(&intent.id)
