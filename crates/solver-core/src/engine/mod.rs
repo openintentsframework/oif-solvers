@@ -146,7 +146,6 @@ impl SolverEngine {
 		// Batch claim processing
 		let mut claim_batch = Vec::new();
 
-		// Add at the top of run() method after other declarations
 		// TODO: Make this configurable?
 		let semaphore = Arc::new(Semaphore::new(100)); // Limit to 100 concurrent tasks
 
@@ -154,11 +153,6 @@ impl SolverEngine {
 			tokio::select! {
 				// Handle discovered intents
 				Some(intent) = intent_rx.recv() => {
-					tracing::info!(
-						order_id = %truncate_id(&intent.id),
-						"Discovered intent"
-					);
-
 					self.spawn_handler(&semaphore, move |engine| async move {
 						if let Err(e) = engine.intent_handler.handle(intent).await {
 							return Err(EngineError::Service(format!("Failed to handle intent: {}", e)));
@@ -221,7 +215,7 @@ impl SolverEngine {
 						SolverEvent::Settlement(SettlementEvent::ClaimReady { order_id }) => {
 							claim_batch.push(order_id);
 							if claim_batch.len() >= CLAIM_BATCH {
-								let mut batch = claim_batch.clone();
+								let mut batch = std::mem::take(&mut claim_batch);
 								claim_batch.clear();
 								self.spawn_handler(&semaphore, move |engine| async move {
 									if let Err(e) = engine.settlement_handler.process_claim_batch(&mut batch).await {
@@ -280,13 +274,18 @@ impl SolverEngine {
 		Fut: Future<Output = Result<(), EngineError>> + Send,
 	{
 		let engine = self.clone();
-		let permit = semaphore.clone().acquire_owned().await;
-
-		tokio::spawn(async move {
-			let _permit = permit; // Keep permit alive for duration of task
-			if let Err(e) = handler(engine).await {
-				tracing::error!("Handler error: {}", e);
+		match semaphore.clone().acquire_owned().await {
+			Ok(permit) => {
+				tokio::spawn(async move {
+					let _permit = permit; // Keep permit alive for duration of task
+					if let Err(e) = handler(engine).await {
+						tracing::error!("Handler error: {}", e);
+					}
+				});
 			}
-		});
+			Err(e) => {
+				tracing::error!("Failed to acquire semaphore permit: {}", e);
+			}
+		}
 	}
 }
