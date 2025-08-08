@@ -10,7 +10,6 @@ pub mod lifecycle;
 
 use crate::handlers::{IntentHandler, OrderHandler, SettlementHandler, TransactionHandler};
 use crate::state::OrderStateMachine;
-use crate::utils::truncate_id;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_discovery::DiscoveryService;
