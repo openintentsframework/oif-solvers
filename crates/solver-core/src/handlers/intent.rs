@@ -63,7 +63,9 @@ impl IntentHandler {
 			.storage
 			.exists(StorageKey::Intents.as_str(), &intent.id)
 			.await
-			.map_err(|e| IntentError::Storage(format!("Failed to check intent existence: {}", e)))?;
+			.map_err(|e| {
+				IntentError::Storage(format!("Failed to check intent existence: {}", e))
+			})?;
 		if exists {
 			tracing::debug!(
 				"Intent ({}) already exists, skipping duplicate processing",
