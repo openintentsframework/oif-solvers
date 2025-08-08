@@ -18,9 +18,15 @@ use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+/// Errors that can occur during engine operations.
+/// 
+/// These errors represent various failure modes that can occur while
+/// the solver engine is running, including configuration issues,
+/// service failures, and handler errors.
 #[derive(Debug, Error)]
 pub enum EngineError {
 	#[error("Configuration error: {0}")]
@@ -64,6 +70,9 @@ pub struct SolverEngine {
 }
 
 /// Number of orders to batch together for claim operations.
+/// 
+/// This constant defines how many orders are batched together when
+/// submitting claim transactions to reduce gas costs.
 static CLAIM_BATCH: usize = 1;
 
 impl SolverEngine {
@@ -143,6 +152,27 @@ impl SolverEngine {
 		// Batch claim processing
 		let mut claim_batch = Vec::new();
 
+		// Start storage cleanup task
+		let storage = self.storage.clone();
+		let cleanup_interval = tokio::time::interval(Duration::from_secs(
+			self.config.storage.cleanup_interval_seconds,
+		));
+		let cleanup_handle = tokio::spawn(async move {
+			let mut interval = cleanup_interval;
+			loop {
+				interval.tick().await;
+				match storage.cleanup_expired().await {
+					Ok(count) if count > 0 => {
+						tracing::debug!("Storage cleanup: removed {} expired entries", count);
+					}
+					Err(e) => {
+						tracing::warn!("Storage cleanup failed: {}", e);
+					}
+					_ => {} // No expired entries
+				}
+			}
+		});
+
 		loop {
 			tokio::select! {
 				// Handle discovered intents
@@ -203,6 +233,8 @@ impl SolverEngine {
 		}
 
 		// Cleanup
+		cleanup_handle.abort(); // Stop the cleanup task
+
 		self.discovery
 			.stop_all()
 			.await
