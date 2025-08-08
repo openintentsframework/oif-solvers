@@ -11,7 +11,6 @@ pub mod lifecycle;
 use crate::handlers::{IntentHandler, OrderHandler, SettlementHandler, TransactionHandler};
 use crate::state::OrderStateMachine;
 use crate::utils::truncate_id;
-use crate::SolverError;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_discovery::DiscoveryService;
@@ -162,7 +161,7 @@ impl SolverEngine {
 
 					self.spawn_handler(&semaphore, move |engine| async move {
 						if let Err(e) = engine.intent_handler.handle(intent).await {
-							return Err(SolverError::Service(format!("Failed to handle intent: {}", e)));
+							return Err(EngineError::Service(format!("Failed to handle intent: {}", e)));
 						}
 						Ok(())
 					})
@@ -175,7 +174,7 @@ impl SolverEngine {
 						SolverEvent::Order(OrderEvent::Preparing { intent, order, params }) => {
 							self.spawn_handler(&semaphore, move |engine| async move {
 								if let Err(e) = engine.order_handler.handle_preparation(intent, order, params).await {
-									return Err(SolverError::Service(format!("Failed to handle order preparation: {}", e)));
+									return Err(EngineError::Service(format!("Failed to handle order preparation: {}", e)));
 								}
 								Ok(())
 							})
@@ -184,7 +183,7 @@ impl SolverEngine {
 						SolverEvent::Order(OrderEvent::Executing { order, params }) => {
 							self.spawn_handler(&semaphore, move |engine| async move {
 								if let Err(e) = engine.order_handler.handle_execution(order, params).await {
-									return Err(SolverError::Service(format!("Failed to handle order execution: {}", e)));
+									return Err(EngineError::Service(format!("Failed to handle order execution: {}", e)));
 								}
 								Ok(())
 							})
@@ -202,7 +201,7 @@ impl SolverEngine {
 						SolverEvent::Delivery(DeliveryEvent::TransactionConfirmed { order_id, tx_hash, tx_type, receipt }) => {
 							self.spawn_handler(&semaphore, move |engine| async move {
 								if let Err(e) = engine.transaction_handler.handle_confirmed(order_id, tx_hash, tx_type, receipt).await {
-									return Err(SolverError::Service(format!("Failed to handle transaction confirmation: {}", e)));
+									return Err(EngineError::Service(format!("Failed to handle transaction confirmation: {}", e)));
 								}
 								Ok(())
 							})
@@ -212,7 +211,7 @@ impl SolverEngine {
 						SolverEvent::Delivery(DeliveryEvent::TransactionFailed { order_id, tx_hash, tx_type, error }) => {
 							self.spawn_handler(&semaphore, move |engine| async move {
 								if let Err(e) = engine.transaction_handler.handle_failed(order_id, tx_hash, tx_type, error).await {
-									return Err(SolverError::Service(format!("Failed to handle transaction failure: {}", e)));
+									return Err(EngineError::Service(format!("Failed to handle transaction failure: {}", e)));
 								}
 								Ok(())
 							})
@@ -226,7 +225,7 @@ impl SolverEngine {
 								claim_batch.clear();
 								self.spawn_handler(&semaphore, move |engine| async move {
 									if let Err(e) = engine.settlement_handler.process_claim_batch(&mut batch).await {
-										return Err(SolverError::Service(format!("Failed to process claim batch: {}", e)));
+										return Err(EngineError::Service(format!("Failed to process claim batch: {}", e)));
 									}
 									Ok(())
 								})
@@ -278,7 +277,7 @@ impl SolverEngine {
 	async fn spawn_handler<F, Fut>(&self, semaphore: &Arc<Semaphore>, handler: F)
 	where
 		F: FnOnce(SolverEngine) -> Fut + Send + 'static,
-		Fut: Future<Output = Result<(), SolverError>> + Send,
+		Fut: Future<Output = Result<(), EngineError>> + Send,
 	{
 		let engine = self.clone();
 		let permit = semaphore.clone().acquire_owned().await;
