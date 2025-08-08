@@ -17,6 +17,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+/// Errors that can occur during solver engine construction.
+/// 
+/// These errors indicate problems with configuration or missing required components
+/// when building a solver engine instance.
 #[derive(Debug, Error)]
 pub enum BuilderError {
 	#[error("Configuration error: {0}")]
@@ -25,7 +29,11 @@ pub enum BuilderError {
 	MissingComponent(String),
 }
 
-/// Container for all factory functions needed to build a SolverEngine
+/// Container for all factory functions needed to build a SolverEngine.
+/// 
+/// This struct holds factory functions for creating implementations of each
+/// service type required by the solver engine. Each factory function takes
+/// a TOML configuration value and returns the corresponding service implementation.
 pub struct SolverFactories<SF, AF, DF, DIF, OF, SEF, STF> {
 	pub storage_factories: HashMap<String, SF>,
 	pub account_factory: AF,

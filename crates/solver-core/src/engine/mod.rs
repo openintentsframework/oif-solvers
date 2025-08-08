@@ -22,6 +22,11 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+/// Errors that can occur during engine operations.
+/// 
+/// These errors represent various failure modes that can occur while
+/// the solver engine is running, including configuration issues,
+/// service failures, and handler errors.
 #[derive(Debug, Error)]
 pub enum EngineError {
 	#[error("Configuration error: {0}")]
@@ -65,6 +70,9 @@ pub struct SolverEngine {
 }
 
 /// Number of orders to batch together for claim operations.
+/// 
+/// This constant defines how many orders are batched together when
+/// submitting claim transactions to reduce gas costs.
 static CLAIM_BATCH: usize = 1;
 
 impl SolverEngine {

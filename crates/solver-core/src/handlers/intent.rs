@@ -15,6 +15,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
 
+/// Errors that can occur during intent processing.
+/// 
+/// These errors represent failures in validating intents,
+/// storing them, or communicating with required services.
 #[derive(Debug, Error)]
 pub enum IntentError {
 	#[error("Validation error: {0}")]
@@ -25,6 +29,11 @@ pub enum IntentError {
 	Service(String),
 }
 
+/// Handler for processing discovered intents into executable orders.
+/// 
+/// The IntentHandler validates incoming intents, creates orders from them,
+/// stores them in the persistence layer, and determines execution strategy
+/// through the order service.
 pub struct IntentHandler {
 	order_service: Arc<OrderService>,
 	storage: Arc<StorageService>,

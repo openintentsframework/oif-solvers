@@ -63,6 +63,9 @@ impl AlloyDelivery {
 }
 
 /// Configuration schema for Alloy delivery provider.
+/// 
+/// This schema defines the required configuration fields for the Alloy
+/// delivery provider, including RPC URL and chain ID validation.
 pub struct AlloyDeliverySchema;
 
 impl ConfigSchema for AlloyDeliverySchema {
