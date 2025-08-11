@@ -323,6 +323,23 @@ cat > config/demo.toml << EOF
 id = "oif-solver-local-dual-chain"
 monitoring_timeout_minutes = 5
 
+# Networks configuration
+[networks.$ORIGIN_CHAIN_ID]
+input_settler_address = "$INPUT_SETTLER"
+output_settler_address = "$OUTPUT_SETTLER"
+[[networks.$ORIGIN_CHAIN_ID.tokens]]
+address = "$TOKEN_ORIGIN"
+symbol = "TEST"
+decimals = 18
+
+[networks.$DEST_CHAIN_ID]
+input_settler_address = "$INPUT_SETTLER"
+output_settler_address = "$OUTPUT_SETTLER"
+[[networks.$DEST_CHAIN_ID.tokens]]
+address = "$TOKEN_DEST"
+symbol = "TEST"
+decimals = 18
+
 [storage]
 primary = "file"
 cleanup_interval_seconds = 3600
@@ -356,19 +373,17 @@ chain_id = $DEST_CHAIN_ID
 [discovery]
 [discovery.sources.onchain_eip7683]
 rpc_url = "http://localhost:$ORIGIN_PORT"
-settler_addresses = ["$INPUT_SETTLER"]
+chain_id = $ORIGIN_CHAIN_ID
 
 [discovery.sources.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
 rpc_url = "http://localhost:8545"
-settler_address = "$INPUT_SETTLER"
 # auth_token = "your-secret-token"
 
 [order]
 [order.implementations.eip7683]
-output_settler_address = "$OUTPUT_SETTLER"
-input_settler_address = "$INPUT_SETTLER"
+# No config needed - uses networks config
 
 [order.execution_strategy]
 strategy_type = "simple"

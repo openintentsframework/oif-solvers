@@ -4,6 +4,23 @@
 id = "oif-solver-local-dual-chain"
 monitoring_timeout_minutes = 5
 
+# Networks configuration
+[networks.31337]
+input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+output_settler_address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+[[networks.31337.tokens]]
+address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+symbol = "TEST"
+decimals = 18
+
+[networks.31338]
+input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+output_settler_address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+[[networks.31338.tokens]]
+address = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+symbol = "TEST"
+decimals = 18
+
 [storage]
 primary = "file"
 cleanup_interval_seconds = 3600
@@ -37,19 +54,17 @@ chain_id = 31338
 [discovery]
 [discovery.sources.onchain_eip7683]
 rpc_url = "http://localhost:8545"
-settler_addresses = ["0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"]
+chain_id = 31337
 
 [discovery.sources.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
 rpc_url = "http://localhost:8545"
-settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 # auth_token = "your-secret-token"
 
 [order]
 [order.implementations.eip7683]
-output_settler_address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+# No config needed - uses networks config
 
 [order.execution_strategy]
 strategy_type = "simple"

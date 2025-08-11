@@ -64,8 +64,14 @@ impl SolverBuilder {
 		SF: Fn(&toml::Value) -> Result<Box<dyn StorageInterface>, StorageError>,
 		AF: FnOnce(&toml::Value) -> Result<Box<dyn AccountInterface>, AccountError>,
 		DF: Fn(&toml::Value) -> Result<Box<dyn DeliveryInterface>, DeliveryError>,
-		DIF: Fn(&toml::Value) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError>,
-		OF: Fn(&toml::Value) -> Result<Box<dyn OrderInterface>, OrderError>,
+		DIF: Fn(
+			&toml::Value,
+			&solver_types::NetworksConfig,
+		) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError>,
+		OF: Fn(
+			&toml::Value,
+			&solver_types::NetworksConfig,
+		) -> Result<Box<dyn OrderInterface>, OrderError>,
 		SEF: Fn(&toml::Value) -> Result<Box<dyn SettlementInterface>, SettlementError>,
 		STF: FnOnce(&toml::Value) -> Box<dyn ExecutionStrategy>,
 	{
@@ -221,7 +227,7 @@ impl SolverBuilder {
 		let mut discovery_sources = Vec::new();
 		for (name, config) in &self.config.discovery.sources {
 			if let Some(factory) = factories.discovery_factories.get(name) {
-				match factory(config) {
+				match factory(config, &self.config.networks) {
 					Ok(source) => {
 						// Validate the configuration using the source's schema
 						match source.config_schema().validate(config) {
@@ -263,7 +269,7 @@ impl SolverBuilder {
 		let mut order_impls = HashMap::new();
 		for (name, config) in &self.config.order.implementations {
 			if let Some(factory) = factories.order_factories.get(name) {
-				match factory(config) {
+				match factory(config, &self.config.networks) {
 					Ok(implementation) => {
 						// Validate the configuration using the implementation's schema
 						match implementation.config_schema().validate(config) {

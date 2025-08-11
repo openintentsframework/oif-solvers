@@ -161,7 +161,7 @@ impl ContextBuilder {
 
 		// Extract from requested outputs (ERC-7930 interoperable addresses)
 		if let Some(outputs) = data.get("requestedOutputs").and_then(|v| v.as_array()) {
-			for (_, output) in outputs.iter().enumerate() {
+			for output in outputs.iter() {
 				if let Some(asset) = output.get("asset").and_then(|v| v.as_str()) {
 					match self.extract_chain_from_interop_address(asset) {
 						Ok(chain_id) => {

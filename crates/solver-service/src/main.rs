@@ -136,7 +136,7 @@ macro_rules! create_factory_map {
 async fn build_solver(config: Config) -> Result<SolverEngine, Box<dyn std::error::Error>> {
 	let builder = SolverBuilder::new(config);
 
-	// Create factory maps using the macro - much cleaner!
+	// Create factory maps using the macro
 	let delivery_factories = create_factory_map!(
 		solver_delivery::DeliveryInterface,
 		solver_delivery::DeliveryError,
@@ -144,17 +144,39 @@ async fn build_solver(config: Config) -> Result<SolverEngine, Box<dyn std::error
 		"destination" => create_http_delivery,
 	);
 
-	let discovery_factories = create_factory_map!(
-		solver_discovery::DiscoveryInterface,
-		solver_discovery::DiscoveryError,
-		"onchain_eip7683" => onchain_create_discovery,
-		"offchain_eip7683" => offchain_create_discovery,
+	// Discovery and order factories are stored directly since they have different signatures
+	let mut discovery_factories = std::collections::HashMap::new();
+	discovery_factories.insert(
+		"onchain_eip7683".to_string(),
+		onchain_create_discovery
+			as fn(
+				&toml::Value,
+				&solver_types::NetworksConfig,
+			) -> Result<
+				Box<dyn solver_discovery::DiscoveryInterface>,
+				solver_discovery::DiscoveryError,
+			>,
+	);
+	discovery_factories.insert(
+		"offchain_eip7683".to_string(),
+		offchain_create_discovery
+			as fn(
+				&toml::Value,
+				&solver_types::NetworksConfig,
+			) -> Result<
+				Box<dyn solver_discovery::DiscoveryInterface>,
+				solver_discovery::DiscoveryError,
+			>,
 	);
 
-	let order_factories = create_factory_map!(
-		solver_order::OrderInterface,
-		solver_order::OrderError,
-		"eip7683" => create_order_impl,
+	let mut order_factories = std::collections::HashMap::new();
+	order_factories.insert(
+		"eip7683".to_string(),
+		create_order_impl
+			as fn(
+				&toml::Value,
+				&solver_types::NetworksConfig,
+			) -> Result<Box<dyn solver_order::OrderInterface>, solver_order::OrderError>,
 	);
 
 	let settlement_factories = create_factory_map!(

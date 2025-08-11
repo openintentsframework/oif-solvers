@@ -14,6 +14,8 @@ pub mod delivery;
 pub mod discovery;
 /// Event types for inter-service communication.
 pub mod events;
+/// Network and token configuration types.
+pub mod networks;
 /// Order processing types including intents, orders, and execution contexts.
 pub mod order;
 /// Standard-specific types for different cross-chain protocols.
@@ -29,6 +31,7 @@ pub use api::*;
 pub use delivery::*;
 pub use discovery::*;
 pub use events::*;
+pub use networks::{NetworkConfig, NetworksConfig, TokenConfig};
 pub use order::*;
 pub use standards::{
 	eip7683::{Eip7683OrderData, Output as Eip7683Output},
