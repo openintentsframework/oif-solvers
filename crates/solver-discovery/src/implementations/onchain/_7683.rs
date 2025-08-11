@@ -18,7 +18,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch
+/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch.
+/// 
+/// This function safely retrieves the current UNIX timestamp in seconds,
+/// returning 0 if the system time is somehow before the UNIX epoch.
 fn current_timestamp() -> u64 {
 	std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
@@ -74,6 +77,8 @@ pub struct Eip7683Discovery {
 	is_monitoring: Arc<AtomicBool>,
 	/// Channel for signaling monitoring shutdown.
 	stop_signal: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+	/// Polling interval for monitoring loop in seconds.
+	polling_interval_secs: u64,
 }
 
 impl Eip7683Discovery {
@@ -84,6 +89,7 @@ impl Eip7683Discovery {
 	pub async fn new(
 		rpc_url: &str,
 		settler_addresses: Vec<String>,
+		polling_interval_secs: Option<u64>,
 	) -> Result<Self, DiscoveryError> {
 		// Create provider
 		let provider = RootProvider::new_http(
@@ -115,6 +121,7 @@ impl Eip7683Discovery {
 			last_block: Arc::new(Mutex::new(current_block)),
 			is_monitoring: Arc::new(AtomicBool::new(false)),
 			stop_signal: Arc::new(Mutex::new(None)),
+			polling_interval_secs: polling_interval_secs.unwrap_or(3), // Default to 3 seconds
 		})
 	}
 
@@ -208,9 +215,10 @@ impl Eip7683Discovery {
 		last_block: Arc<Mutex<u64>>,
 		sender: mpsc::UnboundedSender<Intent>,
 		mut stop_rx: mpsc::Receiver<()>,
+		polling_interval_secs: u64,
 	) {
-		// TODO: make this configurable
-		let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+		let mut interval =
+			tokio::time::interval(std::time::Duration::from_secs(polling_interval_secs));
 
 		loop {
 			tokio::select! {
@@ -255,6 +263,7 @@ impl Eip7683Discovery {
 							last_block: last_block.clone(),
 							is_monitoring: Arc::new(AtomicBool::new(true)),
 							stop_signal: Arc::new(Mutex::new(None)),
+							polling_interval_secs: polling_interval_secs,
 						}, &log).await {
 							let _ = sender.send(intent);
 						}
@@ -271,7 +280,11 @@ impl Eip7683Discovery {
 	}
 }
 
-/// Configuration schema for EIP-7683 discovery.
+/// Configuration schema for EIP-7683 on-chain discovery.
+/// 
+/// This schema validates the configuration for on-chain discovery,
+/// ensuring all required fields are present and have valid values
+/// for monitoring blockchain events.
 pub struct Eip7683DiscoverySchema;
 
 impl ConfigSchema for Eip7683DiscoverySchema {
@@ -332,6 +345,13 @@ impl ConfigSchema for Eip7683DiscoverySchema {
 						max: Some(100),
 					},
 				),
+				Field::new(
+					"polling_interval_secs",
+					FieldType::Integer {
+						min: Some(1),
+						max: Some(300), // Maximum 5 minutes
+					},
+				),
 			],
 		);
 
@@ -359,9 +379,18 @@ impl DiscoveryInterface for Eip7683Discovery {
 		let provider = self.provider.clone();
 		let settler_addresses = self.settler_addresses.clone();
 		let last_block = self.last_block.clone();
+		let polling_interval_secs = self.polling_interval_secs;
 
 		tokio::spawn(async move {
-			Self::monitoring_loop(provider, settler_addresses, last_block, sender, stop_rx).await;
+			Self::monitoring_loop(
+				provider,
+				settler_addresses,
+				last_block,
+				sender,
+				stop_rx,
+				polling_interval_secs,
+			)
+			.await;
 		});
 
 		self.is_monitoring.store(true, Ordering::SeqCst);
@@ -389,6 +418,9 @@ impl DiscoveryInterface for Eip7683Discovery {
 /// - `rpc_url`: The HTTP RPC endpoint URL
 /// - `settler_addresses`: Array of contract addresses to monitor
 ///
+/// Optional configuration parameters:
+/// - `polling_interval_secs`: Polling interval in seconds (defaults to 3)
+///
 /// # Errors
 ///
 /// Returns an error if:
@@ -412,10 +444,16 @@ pub fn create_discovery(
 		})
 		.unwrap_or_default();
 
+	let polling_interval_secs = config
+		.get("polling_interval_secs")
+		.and_then(|v| v.as_integer())
+		.map(|v| v as u64);
+
 	// Create discovery service synchronously
 	let discovery = tokio::task::block_in_place(|| {
-		tokio::runtime::Handle::current()
-			.block_on(async { Eip7683Discovery::new(rpc_url, settler_addresses).await })
+		tokio::runtime::Handle::current().block_on(async {
+			Eip7683Discovery::new(rpc_url, settler_addresses, polling_interval_secs).await
+		})
 	})?;
 
 	Ok(Box::new(discovery))

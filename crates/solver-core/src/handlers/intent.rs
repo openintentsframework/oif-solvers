@@ -17,6 +17,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
 
+/// Errors that can occur during intent processing.
+/// 
+/// These errors represent failures in validating intents,
+/// storing them, or communicating with required services.
 #[derive(Debug, Error)]
 pub enum IntentError {
 	#[error("Validation error: {0}")]
@@ -27,6 +31,11 @@ pub enum IntentError {
 	Service(String),
 }
 
+/// Handler for processing discovered intents into executable orders.
+/// 
+/// The IntentHandler validates incoming intents, creates orders from them,
+/// stores them in the persistence layer, and determines execution strategy
+/// through the order service.
 pub struct IntentHandler {
 	order_service: Arc<OrderService>,
 	storage: Arc<StorageService>,
@@ -101,15 +110,15 @@ impl IntentHandler {
 					}))
 					.ok();
 
-				// Store order
-				self.state_machine
-					.store_order(&order)
+				// Store intent for deduplication
+				self.storage
+					.store(StorageKey::Intents.as_str(), &order.id, &intent)
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 
-				// Store intent for later use
-				self.storage
-					.store(StorageKey::Intents.as_str(), &order.id, &intent)
+				// Store order
+				self.state_machine
+					.store_order(&order)
 					.await
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 
@@ -125,7 +134,6 @@ impl IntentHandler {
 					.map_err(|e| IntentError::Service(e.to_string()))?;
 				match self.order_service.should_execute(&order, &context).await {
 					ExecutionDecision::Execute(params) => {
-						tracing::info!("Preparing order for execution");
 						self.event_bus
 							.publish(SolverEvent::Order(OrderEvent::Preparing {
 								intent: intent.clone(),
