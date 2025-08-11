@@ -15,7 +15,8 @@ pub use validation::QuoteValidator;
 // Main API function
 use solver_config::Config;
 use solver_core::SolverEngine;
-use solver_types::{GetQuoteRequest, GetQuoteResponse, QuoteError};
+use solver_types::{GetQuoteRequest, GetQuoteResponse, Quote, QuoteError, StorageKey};
+use std::time::Duration;
 use tracing::info;
 
 /// Processes a quote request and returns available quote options.
@@ -24,7 +25,7 @@ use tracing::info;
 /// pipeline by delegating to specialized modules.
 pub async fn process_quote_request(
 	request: GetQuoteRequest,
-	_solver: &SolverEngine,
+	solver: &SolverEngine,
 	config: &Config,
 ) -> Result<GetQuoteResponse, QuoteError> {
 	info!(
@@ -42,7 +43,68 @@ pub async fn process_quote_request(
 	let quote_generator = QuoteGenerator::new();
 	let quotes = quote_generator.generate_quotes(&request, config).await?;
 
-	info!("Generated {} quote options", quotes.len());
+	// 4. Store quotes in storage with TTL (5 minutes default)
+	let storage = solver.storage();
+	let quote_ttl = Duration::from_secs(300); // 5 minutes
+
+	for quote in &quotes {
+		if let Err(e) = storage.store_with_ttl(
+			StorageKey::Quotes.as_str(),
+			&quote.quote_id,
+			quote,
+			Some(quote_ttl),
+		).await {
+			tracing::warn!("Failed to store quote {}: {}", quote.quote_id, e);
+			// Continue processing even if storage fails - don't break the quote response
+		} else {
+			tracing::debug!("Stored quote {} with TTL {:?}", quote.quote_id, quote_ttl);
+		}
+	}
+
+	info!("Generated and stored {} quote options", quotes.len());
 
 	Ok(GetQuoteResponse { quotes })
+}
+
+/// Retrieves a stored quote by its ID.
+///
+/// This function looks up a previously generated quote in storage.
+/// Quotes are automatically expired based on their TTL.
+pub async fn get_quote_by_id(
+	quote_id: &str,
+	solver: &SolverEngine,
+) -> Result<Quote, QuoteError> {
+	let storage = solver.storage();
+	
+	match storage.retrieve::<Quote>(StorageKey::Quotes.as_str(), quote_id).await {
+		Ok(quote) => {
+			tracing::debug!("Retrieved quote {} from storage", quote_id);
+			Ok(quote)
+		}
+		Err(e) => {
+			tracing::warn!("Failed to retrieve quote {}: {}", quote_id, e);
+			Err(QuoteError::InvalidRequest(format!("Quote not found: {}", quote_id)))
+		}
+	}
+}
+
+/// Checks if a quote exists in storage.
+///
+/// This is useful for validating quote IDs before processing intents.
+pub async fn quote_exists(
+	quote_id: &str,
+	solver: &SolverEngine,
+) -> Result<bool, QuoteError> {
+	let storage = solver.storage();
+	
+	match storage.exists(StorageKey::Quotes.as_str(), quote_id).await {
+		Ok(exists) => {
+			tracing::debug!("Quote {} exists: {}", quote_id, exists);
+			Ok(exists)
+		}
+		Err(e) => {
+			tracing::warn!("Failed to check quote existence {}: {}", quote_id, e);
+			Err(QuoteError::Internal(format!("Storage error: {}", e)))
+		}
+	}
 }
