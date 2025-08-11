@@ -18,7 +18,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 /// Errors that can occur during solver engine construction.
-/// 
+///
 /// These errors indicate problems with configuration or missing required components
 /// when building a solver engine instance.
 #[derive(Debug, Error)]
@@ -30,7 +30,7 @@ pub enum BuilderError {
 }
 
 /// Container for all factory functions needed to build a SolverEngine.
-/// 
+///
 /// This struct holds factory functions for creating implementations of each
 /// service type required by the solver engine. Each factory function takes
 /// a TOML configuration value and returns the corresponding service implementation.

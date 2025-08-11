@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 /// Errors that can occur during intent processing.
-/// 
+///
 /// These errors represent failures in validating intents,
 /// storing them, or communicating with required services.
 #[derive(Debug, Error)]
@@ -32,7 +32,7 @@ pub enum IntentError {
 }
 
 /// Handler for processing discovered intents into executable orders.
-/// 
+///
 /// The IntentHandler validates incoming intents, creates orders from them,
 /// stores them in the persistence layer, and determines execution strategy
 /// through the order service.

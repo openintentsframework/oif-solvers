@@ -126,10 +126,10 @@ impl Eip7683OrderImpl {
 /// Ensures all addresses are valid Ethereum addresses in hex format.
 ///
 /// Configuration schema for EIP-7683 order implementation.
-/// 
+///
 /// This schema validates the configuration for the EIP-7683 order processor,
 /// ensuring all required addresses are present and properly formatted.
-/// 
+///
 /// # Required Configuration
 ///
 /// ```toml
