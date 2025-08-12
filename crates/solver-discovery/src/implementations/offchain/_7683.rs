@@ -57,8 +57,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use solver_types::{
-	standards::eip7683::MandateOutput, ConfigSchema, Eip7683OrderData, Field, FieldType, Intent,
-	IntentMetadata, NetworksConfig, Schema,
+	standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema, Eip7683OrderData, Field,
+	FieldType, Intent, IntentMetadata, NetworksConfig, Schema,
 };
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -454,12 +454,12 @@ impl Eip7683OffchainDiscovery {
 
 		// Convert to intent format
 		let order_data = Eip7683OrderData {
-			user: format!("0x{}", hex::encode(order.user)),
+			user: with_0x_prefix(&hex::encode(order.user)),
 			nonce: order.nonce,
 			origin_chain_id: order.originChainId,
 			expires: order.expires,
 			fill_deadline: order.fillDeadline,
-			input_oracle: format!("0x{}", hex::encode(order.inputOracle)),
+			input_oracle: with_0x_prefix(&hex::encode(order.inputOracle)),
 			inputs: order.inputs.clone(),
 			order_id,
 			settle_gas_limit: 200_000u64, // TODO: calculate exactly
@@ -479,9 +479,9 @@ impl Eip7683OffchainDiscovery {
 				})
 				.collect(),
 			// Include raw order data for openFor
-			raw_order_data: Some(format!("0x{}", hex::encode(order_bytes))),
+			raw_order_data: Some(with_0x_prefix(&hex::encode(order_bytes))),
 			// Include signature and sponsor
-			signature: Some(format!("0x{}", hex::encode(signature))),
+			signature: Some(with_0x_prefix(&hex::encode(signature))),
 			sponsor: Some(sponsor.to_string()),
 		};
 

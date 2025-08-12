@@ -11,8 +11,8 @@ use alloy_sol_types::{sol, SolEvent, SolValue};
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	standards::eip7683::MandateOutput, ConfigSchema, Eip7683OrderData, Field, FieldType, Intent,
-	IntentMetadata, NetworksConfig, Schema,
+	standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema, Eip7683OrderData, Field,
+	FieldType, Intent, IntentMetadata, NetworksConfig, Schema,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -159,12 +159,12 @@ impl Eip7683Discovery {
 		// Convert to the format expected by the order implementation
 		// The order implementation expects Eip7683OrderData with specific fields
 		let order_data = Eip7683OrderData {
-			user: format!("0x{}", hex::encode(order.user)),
+			user: with_0x_prefix(&hex::encode(order.user)),
 			nonce: order.nonce,
 			origin_chain_id: order.originChainId,
 			expires: order.expires,
 			fill_deadline: order.fillDeadline,
-			input_oracle: format!("0x{}", hex::encode(order.inputOracle)),
+			input_oracle: with_0x_prefix(&hex::encode(order.inputOracle)),
 			inputs: order.inputs.clone(),
 			order_id: order_id.0,
 			settle_gas_limit: 200_000u64, // TODO: calculate exactly
@@ -184,7 +184,7 @@ impl Eip7683Discovery {
 				})
 				.collect::<Vec<_>>(),
 			// Store the raw order data for reference
-			raw_order_data: Some(format!("0x{}", hex::encode(order_bytes))),
+			raw_order_data: Some(with_0x_prefix(&hex::encode(order_bytes))),
 			signature: None,
 			sponsor: None,
 		};

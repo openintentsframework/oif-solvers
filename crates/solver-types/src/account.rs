@@ -3,6 +3,7 @@
 //! This module defines types for blockchain addresses, signatures, and transactions
 //! that are used throughout the solver for account management and transaction processing.
 
+use crate::with_0x_prefix;
 use alloy_primitives::{Address as AlloyAddress, Bytes, PrimitiveSignature, U256};
 use alloy_rpc_types::TransactionRequest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -21,8 +22,7 @@ impl Serialize for Address {
 		S: Serializer,
 	{
 		// Serialize as hex string with 0x prefix
-		let hex_str = format!("0x{}", hex::encode(&self.0));
-		serializer.serialize_str(&hex_str)
+		serializer.serialize_str(&with_0x_prefix(&hex::encode(&self.0)))
 	}
 }
 

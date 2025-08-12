@@ -11,6 +11,7 @@ use axum::{
 };
 use serde::Serialize;
 use solver_core::SolverEngine;
+use solver_types::with_0x_prefix;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -60,13 +61,13 @@ pub async fn get_tokens(State(solver): State<Arc<SolverEngine>>) -> Json<TokensR
 			chain_id.to_string(),
 			NetworkTokens {
 				chain_id: *chain_id,
-				input_settler: format!("0x{}", hex::encode(&network.input_settler_address.0)),
-				output_settler: format!("0x{}", hex::encode(&network.output_settler_address.0)),
+				input_settler: with_0x_prefix(&hex::encode(&network.input_settler_address.0)),
+				output_settler: with_0x_prefix(&hex::encode(&network.output_settler_address.0)),
 				tokens: network
 					.tokens
 					.iter()
 					.map(|t| TokenInfo {
-						address: format!("0x{}", hex::encode(&t.address.0)),
+						address: with_0x_prefix(&hex::encode(&t.address.0)),
 						symbol: t.symbol.clone(),
 						decimals: t.decimals,
 					})
@@ -90,13 +91,13 @@ pub async fn get_tokens_for_chain(
 	match networks.get(&chain_id) {
 		Some(network) => Ok(Json(NetworkTokens {
 			chain_id,
-			input_settler: format!("0x{}", hex::encode(&network.input_settler_address.0)),
-			output_settler: format!("0x{}", hex::encode(&network.output_settler_address.0)),
+			input_settler: with_0x_prefix(&hex::encode(&network.input_settler_address.0)),
+			output_settler: with_0x_prefix(&hex::encode(&network.output_settler_address.0)),
 			tokens: network
 				.tokens
 				.iter()
 				.map(|t| TokenInfo {
-					address: format!("0x{}", hex::encode(&t.address.0)),
+					address: with_0x_prefix(&hex::encode(&t.address.0)),
 					symbol: t.symbol.clone(),
 					decimals: t.decimals,
 				})

@@ -220,7 +220,7 @@ async fn convert_eip7683_order_to_response(
 		};
 
 		serde_json::json!({
-			"hash": format!("0x{}", alloy_primitives::hex::encode(&fill_tx_hash.0)),
+			"hash": with_0x_prefix(&alloy_primitives::hex::encode(&fill_tx_hash.0)),
 			"status": tx_status,
 			"timestamp": order.updated_at
 		})

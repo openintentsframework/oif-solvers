@@ -26,7 +26,7 @@ pub struct ContextBuilder {
 }
 
 impl ContextBuilder {
-	/// Creates a new context builder with required token manager.
+	/// Creates a new context builder.
 	pub fn new(
 		delivery: Arc<DeliveryService>,
 		solver_address: Address,
