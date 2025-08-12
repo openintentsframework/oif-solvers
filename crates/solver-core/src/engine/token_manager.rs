@@ -261,6 +261,39 @@ impl TokenManager {
 		Ok(balances)
 	}
 
+	/// Checks balance for a single token address on a specific chain.
+	///
+	/// Queries the current token balance for the solver's address on a
+	/// specific token and network.
+	///
+	/// # Arguments
+	///
+	/// * `chain_id` - The blockchain network ID
+	/// * `token_address` - The token contract address to check
+	///
+	/// # Returns
+	///
+	/// Returns the balance as a decimal string to avoid precision issues.
+	pub async fn check_balance(
+		&self,
+		chain_id: u64,
+		token_address: &Address,
+	) -> Result<String, TokenManagerError> {
+		let solver_address = self.account.get_address().await?;
+		let solver_address_str = hex::encode(&solver_address.0);
+
+		let balance = self
+			.delivery
+			.get_balance(
+				chain_id,
+				&solver_address_str,
+				Some(&hex::encode(&token_address.0)),
+			)
+			.await?;
+
+		Ok(balance)
+	}
+
 	/// Checks if a token is supported on a specific chain.
 	///
 	/// # Arguments
