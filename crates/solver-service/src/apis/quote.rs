@@ -195,7 +195,6 @@ use solver_types::{
 	GetQuoteRequest, GetQuoteResponse, InteropAddress, Quote, QuoteDetails, QuoteError, QuoteOrder,
 	QuotePreference, SignatureType,
 };
-use tracing::info;
 use uuid::Uuid;
 
 /// Processes a quote request and returns available quote options.
@@ -207,7 +206,7 @@ pub async fn process_quote_request(
 	_solver: &SolverEngine,
 	config: &Config,
 ) -> Result<GetQuoteResponse, QuoteError> {
-	info!(
+	tracing::info!(
 		"Processing quote request with {} inputs",
 		request.available_inputs.len()
 	);
@@ -220,8 +219,6 @@ pub async fn process_quote_request(
 
 	// 3. Generate quotes based on available inputs and requested outputs
 	let quotes = generate_quotes(&request, config).await?;
-
-	info!("Generated {} quote options", quotes.len());
 
 	Ok(GetQuoteResponse { quotes })
 }

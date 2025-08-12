@@ -13,8 +13,8 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	ConfigSchema, Field, FieldType, Schema, Signature, Transaction as SolverTransaction,
-	TransactionHash, TransactionReceipt,
+	with_0x_prefix, ConfigSchema, Field, FieldType, Schema, Signature,
+	Transaction as SolverTransaction, TransactionHash, TransactionReceipt,
 };
 use std::sync::Arc;
 
@@ -147,7 +147,7 @@ impl DeliveryInterface for AlloyDelivery {
 
 		// Get the transaction hash
 		let tx_hash = *pending_tx.tx_hash();
-		let hash_str = hex::encode(tx_hash.0);
+		let hash_str = with_0x_prefix(&hex::encode(tx_hash.0));
 		tracing::info!(tx_hash = %hash_str, "Submitted transaction");
 
 		Ok(TransactionHash(tx_hash.0.to_vec()))

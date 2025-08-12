@@ -2,7 +2,7 @@ use crate::Address;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct TokenConfig {
 	pub address: Address,
 	pub symbol: String,

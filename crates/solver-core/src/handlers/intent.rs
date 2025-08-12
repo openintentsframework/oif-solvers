@@ -5,13 +5,13 @@
 
 use crate::engine::{context::ContextBuilder, event_bus::EventBus, token_manager::TokenManager};
 use crate::state::OrderStateMachine;
-use crate::utils::truncate_id;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_order::OrderService;
 use solver_storage::StorageService;
 use solver_types::{
-	Address, DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageKey,
+	truncate_id, Address, DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent,
+	StorageKey,
 };
 use std::sync::Arc;
 use thiserror::Error;

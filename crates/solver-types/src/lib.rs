@@ -22,6 +22,8 @@ pub mod order;
 pub mod standards;
 /// Storage types for managing persistent data.
 pub mod storage;
+/// Utility functions for common type conversions.
+pub mod utils;
 /// Configuration validation types for ensuring type-safe configurations.
 pub mod validation;
 
@@ -38,4 +40,7 @@ pub use standards::{
 	eip7930::{InteropAddress, InteropAddressError},
 };
 pub use storage::*;
+pub use utils::{
+	bytes32_to_address, format_token_amount, truncate_id, with_0x_prefix, without_0x_prefix,
+};
 pub use validation::*;

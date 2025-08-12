@@ -312,6 +312,11 @@ impl SolverEngine {
 		&self.storage
 	}
 
+	/// Returns a reference to the token manager.
+	pub fn token_manager(&self) -> &Arc<TokenManager> {
+		&self.token_manager
+	}
+
 	/// Helper method to spawn handler tasks with semaphore-based concurrency control.
 	///
 	/// This method:

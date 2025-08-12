@@ -231,11 +231,12 @@ impl TokenManager {
 	///
 	/// # Returns
 	///
-	/// Returns a HashMap mapping (chain_id, token_address) tuples to balance strings.
+	/// Returns a HashMap mapping (chain_id, token_config) tuples to balance strings.
 	/// Balances are returned as decimal strings to avoid precision issues.
+	/// The token_config includes the token address, symbol, and decimals.
 	pub async fn check_balances(
 		&self,
-	) -> Result<HashMap<(u64, Address), String>, TokenManagerError> {
+	) -> Result<HashMap<(u64, TokenConfig), String>, TokenManagerError> {
 		let solver_address = self.account.get_address().await?;
 		let solver_address_str = hex::encode(&solver_address.0);
 		let mut balances = HashMap::new();
@@ -251,7 +252,7 @@ impl TokenManager {
 					)
 					.await?;
 
-				balances.insert((*chain_id, token.address.clone()), balance);
+				balances.insert((*chain_id, token.clone()), balance);
 			}
 		}
 
