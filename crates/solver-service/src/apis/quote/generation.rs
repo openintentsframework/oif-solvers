@@ -11,18 +11,18 @@ use solver_types::{
 
 use uuid::Uuid;
 
-use super::settlement::{EscrowKind, LockKind, SettlementDecision, SettlementStrategy};
+use super::custody::{CustodyDecision, CustodyStrategy, EscrowKind, LockKind};
 
 /// Quote generation engine
 pub struct QuoteGenerator {
-    settlement_strategy: SettlementStrategy,
+    custody_strategy: CustodyStrategy,
 }
 
 impl QuoteGenerator {
     /// Create new quote generator
     pub fn new() -> Self {
         Self {
-            settlement_strategy: SettlementStrategy::new(),
+            custody_strategy: CustodyStrategy::new(),
         }
     }
 
@@ -36,7 +36,7 @@ impl QuoteGenerator {
 
         // For each available input, determine settlement strategy and generate quotes
         for input in &request.available_inputs {
-            let settlement_decision = self.settlement_strategy.decide_settlement(input).await?;
+            let settlement_decision = self.custody_strategy.decide_custody(input).await?;
             
             tracing::info!("Settlement decision: {:?}", settlement_decision);
 
@@ -64,16 +64,16 @@ impl QuoteGenerator {
         &self,
         request: &GetQuoteRequest,
         config: &Config,
-        settlement_decision: &SettlementDecision,
+        settlement_decision: &CustodyDecision,
     ) -> Result<Quote, QuoteError> {
         let quote_id = Uuid::new_v4().to_string();
 
         // Generate the appropriate order based on settlement type
         let order = match settlement_decision {
-            SettlementDecision::ResourceLock { kind } => {
+            CustodyDecision::ResourceLock { kind } => {
                 self.generate_resource_lock_order(request, config, kind)?
             }
-            SettlementDecision::Escrow { kind } => {
+            CustodyDecision::Escrow { kind } => {
                 self.generate_escrow_order(request, config, kind)?
             }
         };

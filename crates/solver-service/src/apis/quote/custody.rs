@@ -1,6 +1,6 @@
-//! Settlement Strategy Decision Logic
+//! Custody Strategy Decision Logic
 //!
-//! This module implements the core logic for deciding between different settlement
+//! This module implements the core logic for deciding between different custody
 //! strategies based on the ERC-7683 standard and available input locks.
 
 use alloy_primitives::Address;
@@ -23,9 +23,9 @@ pub enum EscrowKind {
     Erc3009,
 }
 
-/// Settlement strategy decision
+/// Custody strategy decision
 #[derive(Debug, Clone)]
-pub enum SettlementDecision {
+pub enum CustodyDecision {
     /// Use resource lock - funds stay with user but locked
     ResourceLock { kind: LockKind },
     /// Use escrow - funds transferred to settlement contract
@@ -39,16 +39,16 @@ pub struct TokenCapabilities {
     pub permit2_available: bool,
 }
 
-/// Settlement strategy decision engine
-pub struct SettlementStrategy {
+/// Custody strategy decision engine
+pub struct CustodyStrategy {
     /// Permit2 contract addresses per chain
     permit2_addresses: HashMap<u64, Address>,
     /// Token capabilities cache
     token_capabilities: HashMap<String, TokenCapabilities>,
 }
 
-impl SettlementStrategy {
-    /// Create new settlement strategy engine
+impl CustodyStrategy {
+    /// Create new custody strategy engine
     pub fn new() -> Self {
         Self {
             permit2_addresses: Self::default_permit2_addresses(),
@@ -56,8 +56,8 @@ impl SettlementStrategy {
         }
     }
 
-    /// Decide settlement strategy for a given input
-    pub async fn decide_settlement(&self, input: &AvailableInput) -> Result<SettlementDecision, QuoteError> {
+    /// Decide custody strategy for a given input
+    pub async fn decide_custody(&self, input: &AvailableInput) -> Result<CustodyDecision, QuoteError> {
         // Step 1: Check if input has a lock (resource lock path)
         if let Some(lock) = &input.lock {
             return self.handle_resource_lock(lock);
@@ -68,7 +68,7 @@ impl SettlementStrategy {
     }
 
     /// Handle resource lock cases
-    fn handle_resource_lock(&self, lock: &solver_types::Lock) -> Result<SettlementDecision, QuoteError> {
+    fn handle_resource_lock(&self, lock: &solver_types::Lock) -> Result<CustodyDecision, QuoteError> {
         // Map the API lock kind to our internal lock kind
         let lock_kind = match lock.kind {
             ApiLockKind::TheCompact => LockKind::TheCompact { 
@@ -76,11 +76,11 @@ impl SettlementStrategy {
             },
         };
 
-        Ok(SettlementDecision::ResourceLock { kind: lock_kind })
+        Ok(CustodyDecision::ResourceLock { kind: lock_kind })
     }
 
     /// Decide between Permit2 and ERC-3009 for escrow
-    async fn decide_escrow_strategy(&self, input: &AvailableInput) -> Result<SettlementDecision, QuoteError> {
+    async fn decide_escrow_strategy(&self, input: &AvailableInput) -> Result<CustodyDecision, QuoteError> {
         let chain_id = input.asset.ethereum_chain_id().map_err(|e| {
             QuoteError::InvalidRequest(format!("Invalid chain ID in asset address: {}", e))
         })?;
@@ -93,9 +93,9 @@ impl SettlementStrategy {
 
         // Prefer ERC-3009 if supported, fallback to Permit2
         if capabilities.supports_erc3009 {
-            Ok(SettlementDecision::Escrow { kind: EscrowKind::Erc3009 })
+            Ok(CustodyDecision::Escrow { kind: EscrowKind::Erc3009 })
         } else if capabilities.permit2_available {
-            Ok(SettlementDecision::Escrow { kind: EscrowKind::Permit2 })
+            Ok(CustodyDecision::Escrow { kind: EscrowKind::Permit2 })
         } else {
             Err(QuoteError::UnsupportedSettlement(
                 "No supported settlement mechanism available for this token".to_string()
@@ -164,7 +164,7 @@ impl SettlementStrategy {
     }
 }
 
-impl Default for SettlementStrategy {
+impl Default for CustodyStrategy {
     fn default() -> Self {
         Self::new()
     }

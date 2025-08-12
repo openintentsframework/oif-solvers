@@ -4,12 +4,11 @@
 //! separated from the HTTP API layer for better maintainability and testing.
 
 pub mod generation;
-pub mod settlement;
+pub mod custody;
 pub mod validation;
 
 // Re-export main functionality
 pub use generation::QuoteGenerator;
-// pub use settlement::SettlementStrategy;
 pub use validation::QuoteValidator;
 
 // Main API function
@@ -39,31 +38,40 @@ pub async fn process_quote_request(
 	// 2. Check solver capabilities
 	// TODO: Implement solver capability checking
 
-	// 3. Generate quotes using the business logic layer
-	let quote_generator = QuoteGenerator::new();
-	let quotes = quote_generator.generate_quotes(&request, config).await?;
+    // 3. Generate quotes using the business logic layer
+    let quote_generator = QuoteGenerator::new();
+    let quotes = quote_generator.generate_quotes(&request, config).await?;
 
-	// 4. Store quotes in storage with TTL (5 minutes default)
-	let storage = solver.storage();
-	let quote_ttl = Duration::from_secs(300); // 5 minutes
+    // 4. Persist quotes
+    let quote_ttl = Duration::from_secs(300);
+    store_quotes(solver, &quotes, quote_ttl).await;
 
-	for quote in &quotes {
-		if let Err(e) = storage.store_with_ttl(
-			StorageKey::Quotes.as_str(),
-			&quote.quote_id,
-			quote,
-			Some(quote_ttl),
-		).await {
-			tracing::warn!("Failed to store quote {}: {}", quote.quote_id, e);
-			// Continue processing even if storage fails - don't break the quote response
-		} else {
-			tracing::debug!("Stored quote {} with TTL {:?}", quote.quote_id, quote_ttl);
-		}
-	}
-
-	info!("Generated and stored {} quote options", quotes.len());
+    info!("Generated and stored {} quote options", quotes.len());
 
 	Ok(GetQuoteResponse { quotes })
+}
+
+/// Stores generated quotes with a given TTL.
+///
+/// Storage errors are logged but do not fail the request.
+async fn store_quotes(solver: &SolverEngine, quotes: &[Quote], ttl: Duration) {
+    let storage = solver.storage();
+
+    for quote in quotes {
+        if let Err(e) = storage
+            .store_with_ttl(
+                StorageKey::Quotes.as_str(),
+                &quote.quote_id,
+                quote,
+                Some(ttl),
+            )
+            .await
+        {
+            tracing::warn!("Failed to store quote {}: {}", quote.quote_id, e);
+        } else {
+            tracing::debug!("Stored quote {} with TTL {:?}", quote.quote_id, ttl);
+        }
+    }
 }
 
 /// Retrieves a stored quote by its ID.
