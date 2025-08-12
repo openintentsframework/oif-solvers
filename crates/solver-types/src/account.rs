@@ -11,7 +11,7 @@ use std::fmt;
 /// Blockchain address representation.
 ///
 /// Stores addresses as raw bytes to support different blockchain formats.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Address(pub Vec<u8>);
 
 /// Custom serialization for Address - serializes as hex string

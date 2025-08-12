@@ -349,6 +349,29 @@ impl SolverBuilder {
 
 		let settlement = Arc::new(SettlementService::new(settlement_impls));
 
+		// Create and initialize the TokenManager
+		let token_manager = Arc::new(crate::engine::token_manager::TokenManager::new(
+			self.config.networks.clone(),
+			delivery.clone(),
+			account.clone(),
+		));
+
+		// Ensure all token approvals are set
+		token_manager.ensure_approvals().await.map_err(|e| {
+			tracing::error!(
+				component = "token_manager",
+				error = %e,
+				"Failed to ensure token approvals"
+			);
+			BuilderError::Config(format!("Failed to ensure token approvals: {}", e))
+		})?;
+
+		tracing::info!(
+			component = "token_manager",
+			networks = self.config.networks.len(),
+			"Token manager initialized with approvals"
+		);
+
 		Ok(SolverEngine::new(
 			self.config,
 			storage,
@@ -359,6 +382,7 @@ impl SolverBuilder {
 			order,
 			settlement,
 			EventBus::new(1000),
+			token_manager,
 		))
 	}
 }

@@ -73,7 +73,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Build solver engine with implementations
 	let solver = build_solver(config.clone()).await?;
 	let solver = Arc::new(solver);
-	tracing::info!("Loaded solver engine");
 
 	// Check if API server should be started
 	let api_enabled = config.api.as_ref().is_some_and(|api| api.enabled);
@@ -85,8 +84,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// Start both the solver and the API server concurrently
 		let solver_task = solver.run();
 		let api_task = server::start_server(api_config, api_solver);
-
-		tracing::info!("Starting solver and API server");
 
 		// Run both tasks concurrently
 		tokio::select! {

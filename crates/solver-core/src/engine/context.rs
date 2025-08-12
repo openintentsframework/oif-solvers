@@ -4,6 +4,8 @@
 //! chain information from intents and fetching real-time blockchain data such as
 //! gas prices and solver balances.
 
+use super::token_manager::TokenManager;
+use alloy_primitives::hex;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_types::{Address, ExecutionContext, Intent};
@@ -20,15 +22,22 @@ use crate::SolverError;
 pub struct ContextBuilder {
 	delivery: Arc<DeliveryService>,
 	solver_address: Address,
+	token_manager: Arc<TokenManager>,
 	_config: Config,
 }
 
 impl ContextBuilder {
-	/// Creates a new context builder.
-	pub fn new(delivery: Arc<DeliveryService>, solver_address: Address, config: Config) -> Self {
+	/// Creates a new context builder with required token manager.
+	pub fn new(
+		delivery: Arc<DeliveryService>,
+		solver_address: Address,
+		token_manager: Arc<TokenManager>,
+		config: Config,
+	) -> Self {
 		Self {
 			delivery,
 			solver_address,
+			token_manager,
 			_config: config,
 		}
 	}
@@ -273,7 +282,6 @@ impl ContextBuilder {
 			}
 
 			// Get balances for common tokens on this chain
-			// TODO: This should be configurable per chain
 			let common_tokens = self.get_common_tokens_for_chain(chain_id);
 			for token_address in common_tokens {
 				match self
@@ -299,32 +307,14 @@ impl ContextBuilder {
 		Ok(balances)
 	}
 
-	/// Gets common token addresses for a given chain.
+	/// Gets token addresses for a given chain from the token manager.
 	///
-	/// Returns addresses of commonly used tokens that the solver might hold.
+	/// Returns addresses of tokens configured for this chain.
 	fn get_common_tokens_for_chain(&self, chain_id: u64) -> Vec<String> {
-		// TODO: This should be configurable and loaded from config
-		// For now, return some well-known token addresses per chain
-		match chain_id {
-			1 => vec![
-				// Ethereum mainnet
-				"0xA0b86a33E6441f8C4e73D2B95b8eCf3f1e9BfECa".to_string(), // USDC
-				"0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(), // USDT
-				"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
-			],
-			137 => vec![
-				// Polygon
-				"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174".to_string(), // USDC
-				"0xc2132D05D31c914a87C6611C10748AEb04B58e8F".to_string(), // USDT
-				"0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619".to_string(), // WETH
-			],
-			42161 => vec![
-				// Arbitrum One
-				"0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664".to_string(), // USDC
-				"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9".to_string(), // USDT
-				"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1".to_string(), // WETH
-			],
-			_ => vec![], // No common tokens configured for this chain
-		}
+		self.token_manager
+			.get_tokens_for_chain(chain_id)
+			.into_iter()
+			.map(|token| hex::encode(&token.address.0))
+			.collect()
 	}
 }
