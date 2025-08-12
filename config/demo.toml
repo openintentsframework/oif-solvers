@@ -106,23 +106,13 @@ max_request_size = 1048576  # 1MB
 
 # Contract addresses for testing (used by demo scripts)
 [contracts.origin]
-chain_id = 31337
-rpc_url = "http://localhost:8545"
 tokenA = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 tokenB = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-input_settler = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-the_compact = ""
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-oracle = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
 
 [contracts.destination]
-chain_id = 31338
-rpc_url = "http://localhost:8546"
 tokenA = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 tokenB = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-input_settler = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 
 # Test accounts (used by demo scripts)

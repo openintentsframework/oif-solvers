@@ -282,6 +282,58 @@ cargo run -- --config path/to/your/config.toml
 CONFIG_FILE=path/to/your/config.toml cargo run
 ```
 
+## API Reference
+
+The solver provides a REST API for interacting with the system and submitting off-chain intents. Full OpenAPI specifications are available in the `api-spec/` directory.
+
+### API Specifications
+
+- **Orders API**: [`api-spec/orders-api.yaml`](api-spec/orders-api.yaml) - Submit and track cross-chain intent orders
+- **Tokens API**: [`api-spec/tokens-api.yaml`](api-spec/tokens-api.yaml) - Query supported tokens and networks
+
+### Available Endpoints
+
+#### Orders
+
+- **POST `/api/orders`** - Submit a new EIP-7683 intent order
+  - Request body: `{ order: "0x...", sponsor: "0x...", signature: "0x00..." }`
+  - Returns: `{ status: "success", order_id: "...", message: null }`
+
+- **GET `/api/orders/{id}`** - Get order status and details
+  - Returns complete order information including status, amounts, settlement data, and fill transaction
+
+#### Tokens
+
+- **GET `/api/tokens`** - Get all supported tokens across all networks
+  - Returns a map of chain IDs to network configurations with supported tokens
+
+- **GET `/api/tokens/{chain_id}`** - Get supported tokens for a specific chain
+  - Returns network configuration including settler addresses and token list
+
+### Example Usage
+
+```bash
+# Submit an off-chain intent order
+curl -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order": "0x...",
+    "sponsor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "signature": "0x00..."
+  }'
+
+# Check order status
+curl http://localhost:3000/api/orders/1fa518079ecf01372290adf75c55858771efcbcee080594cc8bc24e3309a3a09
+
+# Get supported tokens for chain 31338
+curl http://localhost:3000/api/tokens/31338
+
+# Get all supported tokens
+curl http://localhost:3000/api/tokens
+```
+
+The API server is enabled by default on port 3000 when the solver is running. You can disable it or change the port in the configuration file.
+
 ### Logging Configuration
 
 The solver uses the `RUST_LOG` environment variable for fine-grained logging control. You can specify different log levels for different modules:

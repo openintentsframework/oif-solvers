@@ -37,22 +37,22 @@ INPUT_SETTLER_ADDRESS=$(grep -A 5 '\[networks.31337\]' config/demo.toml | grep '
 # For destination chain (31338)
 OUTPUT_SETTLER_ADDRESS=$(grep -A 5 '\[networks.31338\]' config/demo.toml | grep 'output_settler_address = ' | cut -d'"' -f2)
 # Solver address from accounts section
-SOLVER_ADDR=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'solver = ' | cut -d'"' -f2)
+SOLVER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'solver = ' | head -1 | cut -d'"' -f2)
 ORACLE_ADDRESS=$(grep 'oracle_address = ' config/demo.toml | cut -d'"' -f2)
 # Default to TokenA addresses
-DEFAULT_ORIGIN_TOKEN=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'tokenA = ' | cut -d'"' -f2)
-DEFAULT_DEST_TOKEN=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'tokenA = ' | cut -d'"' -f2)
-TOKENB_ORIGIN=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'tokenB = ' | cut -d'"' -f2)
-TOKENB_DEST=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'tokenB = ' | cut -d'"' -f2)
-USER_ADDR=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'user = ' | cut -d'"' -f2)
-USER_PRIVATE_KEY=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'user_private_key = ' | cut -d'"' -f2)
-RECIPIENT_ADDR=$(grep -A 10 '\[accounts\]' config/demo.toml | grep 'recipient = ' | cut -d'"' -f2)
+DEFAULT_ORIGIN_TOKEN=$(grep -A 2 '\[contracts.origin\]' config/demo.toml | grep 'tokenA = ' | head -1 | cut -d'"' -f2)
+DEFAULT_DEST_TOKEN=$(grep -A 2 '\[contracts.destination\]' config/demo.toml | grep 'tokenA = ' | head -1 | cut -d'"' -f2)
+TOKENB_ORIGIN=$(grep -A 2 '\[contracts.origin\]' config/demo.toml | grep 'tokenB = ' | head -1 | cut -d'"' -f2)
+TOKENB_DEST=$(grep -A 2 '\[contracts.destination\]' config/demo.toml | grep 'tokenB = ' | head -1 | cut -d'"' -f2)
+USER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user = ' | head -1 | cut -d'"' -f2)
+USER_PRIVATE_KEY=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user_private_key = ' | head -1 | cut -d'"' -f2)
+RECIPIENT_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'recipient = ' | head -1 | cut -d'"' -f2)
 
-# Load RPC URLs and chain IDs from config
-ORIGIN_RPC_URL=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
-DEST_RPC_URL=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
-ORIGIN_CHAIN_ID=$(grep -A 10 '\[contracts.origin\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
-DEST_CHAIN_ID=$(grep -A 10 '\[contracts.destination\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
+# Load RPC URLs and chain IDs from delivery config
+ORIGIN_RPC_URL=$(grep -A 2 '\[delivery.providers.origin\]' config/demo.toml | grep 'rpc_url = ' | head -1 | cut -d'"' -f2)
+DEST_RPC_URL=$(grep -A 2 '\[delivery.providers.destination\]' config/demo.toml | grep 'rpc_url = ' | head -1 | cut -d'"' -f2)
+ORIGIN_CHAIN_ID=$(grep -A 3 '\[delivery.providers.origin\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
+DEST_CHAIN_ID=$(grep -A 3 '\[delivery.providers.destination\]' config/demo.toml | grep 'chain_id = ' | head -1 | awk '{print $3}')
 
 # Parse command line arguments
 ORIGIN_TOKEN_ADDRESS=""
