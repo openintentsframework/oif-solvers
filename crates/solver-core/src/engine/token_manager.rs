@@ -107,7 +107,7 @@ impl TokenManager {
 	/// necessary approvals are in place before processing orders.
 	pub async fn ensure_approvals(&self) -> Result<(), TokenManagerError> {
 		let solver_address = self.account.get_address().await?;
-		let solver_address_str = hex::encode(&solver_address.0);
+		let solver_address_str = with_0x_prefix(&solver_address.0);
 		let max_uint256 = U256::MAX;
 		let max_uint256_str = max_uint256.to_string();
 
