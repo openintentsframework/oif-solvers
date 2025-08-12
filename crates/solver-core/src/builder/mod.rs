@@ -6,7 +6,6 @@
 //! settlement strategies, and execution strategies.
 
 use crate::engine::{event_bus::EventBus, SolverEngine};
-use alloy_primitives::hex;
 use solver_account::{AccountError, AccountInterface, AccountService};
 use solver_config::Config;
 use solver_delivery::{DeliveryError, DeliveryInterface, DeliveryService};
@@ -14,7 +13,6 @@ use solver_discovery::{DiscoveryError, DiscoveryInterface, DiscoveryService};
 use solver_order::{ExecutionStrategy, OrderError, OrderInterface, OrderService};
 use solver_settlement::{SettlementError, SettlementInterface, SettlementService};
 use solver_storage::{StorageError, StorageInterface, StorageService};
-use solver_types::with_0x_prefix;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -380,7 +378,7 @@ impl SolverBuilder {
 
 					tracing::info!(
 						chain_id = chain_id,
-						token = %with_0x_prefix(&hex::encode(&token.address.0)),
+						token = %token.symbol,
 						balance = %formatted_balance,
 						"Initial solver balance"
 					);

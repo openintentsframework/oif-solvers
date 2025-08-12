@@ -22,7 +22,9 @@
 use alloy_primitives::{hex, U256};
 use solver_account::AccountService;
 use solver_delivery::DeliveryService;
-use solver_types::{Address, NetworksConfig, TokenConfig, Transaction, TransactionHash};
+use solver_types::{
+	with_0x_prefix, Address, NetworksConfig, TokenConfig, Transaction, TransactionHash,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -107,7 +109,7 @@ impl TokenManager {
 	/// necessary approvals are in place before processing orders.
 	pub async fn ensure_approvals(&self) -> Result<(), TokenManagerError> {
 		let solver_address = self.account.get_address().await?;
-		let solver_address_str = with_0x_prefix(&solver_address.0);
+		let solver_address_str = with_0x_prefix(&hex::encode(&solver_address.0));
 		let max_uint256 = U256::MAX;
 		let max_uint256_str = max_uint256.to_string();
 
