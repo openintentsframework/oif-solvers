@@ -41,3 +41,4 @@ alloy-primitives = { version = "0.8", features = ["std", "serde"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio-test = "0.4"
+mockall = "0.12"

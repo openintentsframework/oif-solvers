@@ -363,6 +363,7 @@ mod tests {
 		let delivery_factories = create_factory_map!(
 			solver_delivery::DeliveryInterface,
 			solver_delivery::DeliveryError,
+			delivery,
 			"origin" => create_http_delivery,
 			"destination" => create_http_delivery,
 		);
@@ -391,6 +392,7 @@ mod tests {
 		let settlement_factories = create_factory_map!(
 			solver_settlement::SettlementInterface,
 			solver_settlement::SettlementError,
+			networks,
 			"eip7683" => create_settlement,
 		);
 
@@ -461,6 +463,7 @@ id = "test-file-solver"
 monitoring_timeout_minutes = 2
 
 [networks.31337]
+rpc_url = "http://localhost:8545"
 input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 [[networks.31337.tokens]]
@@ -469,6 +472,7 @@ symbol = "TOKA"
 decimals = 18
 
 [networks.31338]
+rpc_url = "http://localhost:8546"
 input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 [[networks.31338.tokens]]
@@ -528,12 +532,14 @@ strategy_type = "simple"
 		let delivery_factories = create_factory_map!(
 			solver_delivery::DeliveryInterface,
 			solver_delivery::DeliveryError,
+			delivery,
 			"origin" => create_http_delivery,
 		);
 
 		let settlement_factories = create_factory_map!(
 			solver_settlement::SettlementInterface,
 			solver_settlement::SettlementError,
+			networks,
 			"eip7683" => create_settlement,
 		);
 
