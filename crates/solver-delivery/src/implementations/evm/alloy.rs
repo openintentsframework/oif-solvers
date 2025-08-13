@@ -5,7 +5,7 @@
 
 use crate::{DeliveryError, DeliveryInterface};
 use alloy_network::EthereumWallet;
-use alloy_primitives::FixedBytes;
+use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::TransactionRequest;
 use alloy_signer::Signer;
@@ -13,8 +13,8 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	ConfigSchema, Field, FieldType, Schema, Signature, Transaction as SolverTransaction,
-	TransactionHash, TransactionReceipt,
+	with_0x_prefix, ConfigSchema, Field, FieldType, Schema, Signature,
+	Transaction as SolverTransaction, TransactionHash, TransactionReceipt,
 };
 use std::sync::Arc;
 
@@ -55,6 +55,10 @@ impl AlloyDelivery {
 			.wallet(wallet)
 			.on_http(url);
 
+		provider
+			.client()
+			.set_poll_interval(std::time::Duration::from_secs(7));
+
 		Ok(Self {
 			provider: Arc::new(provider),
 			_chain_id: chain_id,
@@ -63,7 +67,7 @@ impl AlloyDelivery {
 }
 
 /// Configuration schema for Alloy delivery provider.
-/// 
+///
 /// This schema defines the required configuration fields for the Alloy
 /// delivery provider, including RPC URL and chain ID validation.
 pub struct AlloyDeliverySchema;
@@ -143,7 +147,7 @@ impl DeliveryInterface for AlloyDelivery {
 
 		// Get the transaction hash
 		let tx_hash = *pending_tx.tx_hash();
-		let hash_str = hex::encode(tx_hash.0);
+		let hash_str = with_0x_prefix(&hex::encode(tx_hash.0));
 		tracing::info!(tx_hash = %hash_str, "Submitted transaction");
 
 		Ok(TransactionHash(tx_hash.0.to_vec()))
@@ -245,6 +249,139 @@ impl DeliveryInterface for AlloyDelivery {
 			block_number: receipt.block_number.unwrap_or(0),
 			success: receipt.status(),
 		})
+	}
+
+	async fn get_gas_price(&self) -> Result<String, DeliveryError> {
+		let gas_price = self
+			.provider
+			.get_gas_price()
+			.await
+			.map_err(|e| DeliveryError::Network(format!("Failed to get gas price: {}", e)))?;
+
+		Ok(gas_price.to_string())
+	}
+
+	async fn get_balance(
+		&self,
+		address: &str,
+		token: Option<&str>,
+	) -> Result<String, DeliveryError> {
+		let address: Address = address
+			.parse()
+			.map_err(|e| DeliveryError::Network(format!("Invalid address: {}", e)))?;
+
+		match token {
+			None => {
+				// Get native token balance
+				let balance =
+					self.provider.get_balance(address).await.map_err(|e| {
+						DeliveryError::Network(format!("Failed to get balance: {}", e))
+					})?;
+
+				Ok(balance.to_string())
+			}
+			Some(token_address) => {
+				// Get ERC-20 token balance
+				let token_addr: Address = token_address
+					.parse()
+					.map_err(|e| DeliveryError::Network(format!("Invalid token address: {}", e)))?;
+
+				// Create the balanceOf call data
+				// balanceOf(address) selector is 0x70a08231
+				let selector = [0x70, 0xa0, 0x82, 0x31];
+				let mut call_data = Vec::new();
+				call_data.extend_from_slice(&selector);
+				call_data.extend_from_slice(&[0; 12]); // Pad to 32 bytes
+				call_data.extend_from_slice(address.as_slice());
+
+				let call_result = self
+					.provider
+					.call(
+						&TransactionRequest::default()
+							.to(token_addr)
+							.input(call_data.into()),
+					)
+					.await
+					.map_err(|e| {
+						DeliveryError::Network(format!("Failed to call balanceOf: {}", e))
+					})?;
+
+				if call_result.len() < 32 {
+					return Err(DeliveryError::Network(
+						"Invalid balanceOf response".to_string(),
+					));
+				}
+
+				let balance = U256::from_be_slice(&call_result[..32]);
+				Ok(balance.to_string())
+			}
+		}
+	}
+
+	async fn get_allowance(
+		&self,
+		owner: &str,
+		spender: &str,
+		token_address: &str,
+	) -> Result<String, DeliveryError> {
+		let owner_addr: Address = owner
+			.parse()
+			.map_err(|e| DeliveryError::Network(format!("Invalid owner address: {}", e)))?;
+
+		let spender_addr: Address = spender
+			.parse()
+			.map_err(|e| DeliveryError::Network(format!("Invalid spender address: {}", e)))?;
+
+		let token_addr: Address = token_address
+			.parse()
+			.map_err(|e| DeliveryError::Network(format!("Invalid token address: {}", e)))?;
+
+		// Create the allowance call data
+		// allowance(address,address) selector is 0xdd62ed3e
+		let selector = [0xdd, 0x62, 0xed, 0x3e];
+		let mut call_data = Vec::new();
+		call_data.extend_from_slice(&selector);
+		call_data.extend_from_slice(&[0; 12]); // Pad owner address to 32 bytes
+		call_data.extend_from_slice(owner_addr.as_slice());
+		call_data.extend_from_slice(&[0; 12]); // Pad spender address to 32 bytes
+		call_data.extend_from_slice(spender_addr.as_slice());
+
+		let call_request = TransactionRequest::default()
+			.to(token_addr)
+			.input(call_data.into());
+
+		let call_result = self
+			.provider
+			.call(&call_request)
+			.await
+			.map_err(|e| DeliveryError::Network(format!("Failed to call allowance: {}", e)))?;
+
+		if call_result.len() < 32 {
+			return Err(DeliveryError::Network(
+				"Invalid allowance response".to_string(),
+			));
+		}
+
+		let allowance = U256::from_be_slice(&call_result[..32]);
+		Ok(allowance.to_string())
+	}
+
+	async fn get_nonce(&self, address: &str) -> Result<u64, DeliveryError> {
+		let address: Address = address
+			.parse()
+			.map_err(|e| DeliveryError::Network(format!("Invalid address: {}", e)))?;
+
+		self.provider
+			.get_transaction_count(address)
+			.await
+			.map_err(|e| DeliveryError::Network(format!("Failed to get nonce: {}", e)))
+	}
+
+	async fn get_block_number(&self) -> Result<u64, DeliveryError> {
+		self.provider
+			.get_block_number()
+			.await
+			.map_err(|e| DeliveryError::Network(format!("Failed to get block number: {}", e)))
 	}
 }
 

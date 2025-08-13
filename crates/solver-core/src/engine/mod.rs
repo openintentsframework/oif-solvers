@@ -7,16 +7,19 @@
 pub mod context;
 pub mod event_bus;
 pub mod lifecycle;
+pub mod token_manager;
 
+use self::token_manager::TokenManager;
 use crate::handlers::{IntentHandler, OrderHandler, SettlementHandler, TransactionHandler};
 use crate::state::OrderStateMachine;
+use solver_account::AccountService;
 use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_discovery::DiscoveryService;
 use solver_order::OrderService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
-use solver_types::{DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
+use solver_types::{Address, DeliveryEvent, OrderEvent, SettlementEvent, SolverEvent};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +27,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, Semaphore};
 
 /// Errors that can occur during engine operations.
-/// 
+///
 /// These errors represent various failure modes that can occur while
 /// the solver engine is running, including configuration issues,
 /// service failures, and handler errors.
@@ -45,6 +48,9 @@ pub struct SolverEngine {
 	pub(crate) config: Config,
 	/// Storage service for persisting state.
 	pub(crate) storage: Arc<StorageService>,
+	/// Account service for address and signing operations.
+	#[allow(dead_code)]
+	pub(crate) account: Arc<AccountService>,
 	/// Delivery service for blockchain transactions.
 	#[allow(dead_code)]
 	pub(crate) delivery: Arc<DeliveryService>,
@@ -56,6 +62,9 @@ pub struct SolverEngine {
 	/// Settlement service for monitoring and claiming.
 	#[allow(dead_code)]
 	pub(crate) settlement: Arc<SettlementService>,
+	/// Token manager for token approvals and validation.
+	#[allow(dead_code)]
+	pub(crate) token_manager: Arc<TokenManager>,
 	/// Event bus for inter-service communication.
 	pub(crate) event_bus: event_bus::EventBus,
 	/// Order state machine
@@ -72,21 +81,25 @@ pub struct SolverEngine {
 }
 
 /// Number of orders to batch together for claim operations.
-/// 
+///
 /// This constant defines how many orders are batched together when
 /// submitting claim transactions to reduce gas costs.
 static CLAIM_BATCH: usize = 1;
 
 impl SolverEngine {
 	/// Creates a new solver engine with the given services
+	#[allow(clippy::too_many_arguments)]
 	pub fn new(
 		config: Config,
 		storage: Arc<StorageService>,
+		account: Arc<AccountService>,
+		solver_address: Address,
 		delivery: Arc<DeliveryService>,
 		discovery: Arc<DiscoveryService>,
 		order: Arc<OrderService>,
 		settlement: Arc<SettlementService>,
 		event_bus: event_bus::EventBus,
+		token_manager: Arc<TokenManager>,
 	) -> Self {
 		let state_machine = Arc::new(OrderStateMachine::new(storage.clone()));
 
@@ -95,6 +108,10 @@ impl SolverEngine {
 			storage.clone(),
 			state_machine.clone(),
 			event_bus.clone(),
+			delivery.clone(),
+			solver_address,
+			token_manager.clone(),
+			config.clone(),
 		));
 
 		let order_handler = Arc::new(OrderHandler::new(
@@ -126,10 +143,12 @@ impl SolverEngine {
 		Self {
 			config,
 			storage,
+			account,
 			delivery,
 			discovery,
 			order,
 			settlement,
+			token_manager,
 			event_bus,
 			state_machine,
 			intent_handler,
@@ -291,6 +310,11 @@ impl SolverEngine {
 	/// Returns a reference to the storage service.
 	pub fn storage(&self) -> &Arc<StorageService> {
 		&self.storage
+	}
+
+	/// Returns a reference to the token manager.
+	pub fn token_manager(&self) -> &Arc<TokenManager> {
+		&self.token_manager
 	}
 
 	/// Helper method to spawn handler tasks with semaphore-based concurrency control.

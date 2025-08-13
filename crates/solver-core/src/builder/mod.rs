@@ -18,7 +18,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 /// Errors that can occur during solver engine construction.
-/// 
+///
 /// These errors indicate problems with configuration or missing required components
 /// when building a solver engine instance.
 #[derive(Debug, Error)]
@@ -30,7 +30,7 @@ pub enum BuilderError {
 }
 
 /// Container for all factory functions needed to build a SolverEngine.
-/// 
+///
 /// This struct holds factory functions for creating implementations of each
 /// service type required by the solver engine. Each factory function takes
 /// a TOML configuration value and returns the corresponding service implementation.
@@ -56,7 +56,7 @@ impl SolverBuilder {
 	}
 
 	/// Builds the SolverEngine using factories for each component type.
-	pub fn build<SF, AF, DF, DIF, OF, SEF, STF>(
+	pub async fn build<SF, AF, DF, DIF, OF, SEF, STF>(
 		self,
 		factories: SolverFactories<SF, AF, DF, DIF, OF, SEF, STF>,
 	) -> Result<SolverEngine, BuilderError>
@@ -64,8 +64,14 @@ impl SolverBuilder {
 		SF: Fn(&toml::Value) -> Result<Box<dyn StorageInterface>, StorageError>,
 		AF: FnOnce(&toml::Value) -> Result<Box<dyn AccountInterface>, AccountError>,
 		DF: Fn(&toml::Value) -> Result<Box<dyn DeliveryInterface>, DeliveryError>,
-		DIF: Fn(&toml::Value) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError>,
-		OF: Fn(&toml::Value) -> Result<Box<dyn OrderInterface>, OrderError>,
+		DIF: Fn(
+			&toml::Value,
+			&solver_types::NetworksConfig,
+		) -> Result<Box<dyn DiscoveryInterface>, DiscoveryError>,
+		OF: Fn(
+			&toml::Value,
+			&solver_types::NetworksConfig,
+		) -> Result<Box<dyn OrderInterface>, OrderError>,
 		SEF: Fn(&toml::Value) -> Result<Box<dyn SettlementInterface>, SettlementError>,
 		STF: FnOnce(&toml::Value) -> Box<dyn ExecutionStrategy>,
 	{
@@ -140,7 +146,23 @@ impl SolverBuilder {
 				))
 			})?;
 		let account = Arc::new(AccountService::new(account_provider));
-		tracing::info!(component = "account", implementation = %self.config.account.provider, "Loaded");
+
+		// Fetch the solver address once during initialization
+		let solver_address = account.get_address().await.map_err(|e| {
+			tracing::error!(
+				component = "account",
+				error = %e,
+				"Failed to get solver address"
+			);
+			BuilderError::Config(format!("Failed to get solver address: {}", e))
+		})?;
+
+		tracing::info!(
+			component = "account",
+			implementation = %self.config.account.provider,
+			address = %solver_address,
+			"Loaded"
+		);
 
 		// Create delivery providers
 		let mut delivery_providers = HashMap::new();
@@ -205,7 +227,7 @@ impl SolverBuilder {
 		let mut discovery_sources = Vec::new();
 		for (name, config) in &self.config.discovery.sources {
 			if let Some(factory) = factories.discovery_factories.get(name) {
-				match factory(config) {
+				match factory(config, &self.config.networks) {
 					Ok(source) => {
 						// Validate the configuration using the source's schema
 						match source.config_schema().validate(config) {
@@ -247,7 +269,7 @@ impl SolverBuilder {
 		let mut order_impls = HashMap::new();
 		for (name, config) in &self.config.order.implementations {
 			if let Some(factory) = factories.order_factories.get(name) {
-				match factory(config) {
+				match factory(config, &self.config.networks) {
 					Ok(implementation) => {
 						// Validate the configuration using the implementation's schema
 						match implementation.config_schema().validate(config) {
@@ -327,14 +349,66 @@ impl SolverBuilder {
 
 		let settlement = Arc::new(SettlementService::new(settlement_impls));
 
+		// Create and initialize the TokenManager
+		let token_manager = Arc::new(crate::engine::token_manager::TokenManager::new(
+			self.config.networks.clone(),
+			delivery.clone(),
+			account.clone(),
+		));
+
+		// Ensure all token approvals are set
+		token_manager.ensure_approvals().await.map_err(|e| {
+			tracing::error!(
+				component = "token_manager",
+				error = %e,
+				"Failed to ensure token approvals"
+			);
+			BuilderError::Config(format!("Failed to ensure token approvals: {}", e))
+		})?;
+
+		// Log initial balances for monitoring
+		match token_manager.check_balances().await {
+			Ok(balances) => {
+				for ((chain_id, token), balance) in &balances {
+					let formatted_balance = format!(
+						"{} {}",
+						solver_types::format_token_amount(balance, token.decimals),
+						token.symbol
+					);
+
+					tracing::info!(
+						chain_id = chain_id,
+						token = %token.symbol,
+						balance = %formatted_balance,
+						"Initial solver balance"
+					);
+				}
+			}
+			Err(e) => {
+				tracing::warn!(
+					error = %e,
+					"Failed to check initial balances"
+				);
+			}
+		}
+
+		tracing::info!(
+			component = "token_manager",
+			networks = self.config.networks.len(),
+			"Token manager initialized with approvals"
+		);
+
 		Ok(SolverEngine::new(
 			self.config,
 			storage,
+			account,
+			solver_address,
 			delivery,
 			discovery,
 			order,
 			settlement,
 			EventBus::new(1000),
+			token_manager,
 		))
 	}
 }

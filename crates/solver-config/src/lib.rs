@@ -5,6 +5,7 @@
 //! all required configuration values are properly set.
 
 use serde::{Deserialize, Serialize};
+use solver_types::{networks::deserialize_networks, NetworksConfig};
 use std::collections::HashMap;
 use std::str::FromStr;
 use thiserror::Error;
@@ -32,6 +33,9 @@ pub enum ConfigError {
 pub struct Config {
 	/// Configuration specific to the solver instance.
 	pub solver: SolverConfig,
+	/// Network and token configurations.
+	#[serde(deserialize_with = "deserialize_networks")]
+	pub networks: NetworksConfig,
 	/// Configuration for the storage backend.
 	pub storage: StorageConfig,
 	/// Configuration for delivery mechanisms.
@@ -69,7 +73,7 @@ pub struct SolverConfig {
 }
 
 /// Returns the default monitoring timeout in minutes.
-/// 
+///
 /// This provides a default value of 480 minutes (8 hours) for monitoring operations
 /// when no explicit timeout is configured.
 fn default_monitoring_timeout_minutes() -> u64 {
@@ -100,7 +104,7 @@ pub struct DeliveryConfig {
 }
 
 /// Returns the default number of confirmations required.
-/// 
+///
 /// This provides a default value of 12 confirmations for transaction finality
 /// when no explicit confirmation count is configured.
 fn default_confirmations() -> u64 {
@@ -198,7 +202,7 @@ pub struct CorsConfig {
 }
 
 /// Returns the default API host.
-/// 
+///
 /// This provides a default host address of 127.0.0.1 (localhost) for the API server
 /// when no explicit host is configured.
 fn default_api_host() -> String {
@@ -206,7 +210,7 @@ fn default_api_host() -> String {
 }
 
 /// Returns the default API port.
-/// 
+///
 /// This provides a default port of 3000 for the API server
 /// when no explicit port is configured.
 fn default_api_port() -> u16 {
@@ -214,7 +218,7 @@ fn default_api_port() -> u16 {
 }
 
 /// Returns the default API timeout in seconds.
-/// 
+///
 /// This provides a default timeout of 30 seconds for API requests
 /// when no explicit timeout is configured.
 fn default_api_timeout() -> u64 {
@@ -222,7 +226,7 @@ fn default_api_timeout() -> u64 {
 }
 
 /// Returns the default maximum request size in bytes.
-/// 
+///
 /// This provides a default maximum request size of 1MB (1024 * 1024 bytes)
 /// when no explicit limit is configured.
 fn default_max_request_size() -> usize {
@@ -249,10 +253,43 @@ impl Config {
 	/// - Ensures at least one discovery source exists
 	/// - Validates order implementations and strategy are configured
 	/// - Checks that settlement implementations are present
+	/// - Validates networks configuration
 	fn validate(&self) -> Result<(), ConfigError> {
 		// Validate solver config
 		if self.solver.id.is_empty() {
 			return Err(ConfigError::Validation("Solver ID cannot be empty".into()));
+		}
+
+		// Validate networks config
+		if self.networks.is_empty() {
+			return Err(ConfigError::Validation(
+				"Networks configuration cannot be empty".into(),
+			));
+		}
+		if self.networks.len() < 2 {
+			return Err(ConfigError::Validation(
+				"At least 2 different networks must be configured".into(),
+			));
+		}
+		for (chain_id, network) in &self.networks {
+			if network.input_settler_address.0.is_empty() {
+				return Err(ConfigError::Validation(format!(
+					"Network {} must have input_settler_address",
+					chain_id
+				)));
+			}
+			if network.output_settler_address.0.is_empty() {
+				return Err(ConfigError::Validation(format!(
+					"Network {} must have output_settler_address",
+					chain_id
+				)));
+			}
+			if network.tokens.is_empty() {
+				return Err(ConfigError::Validation(format!(
+					"Network {} must have at least 1 token configured",
+					chain_id
+				)));
+			}
 		}
 
 		// Validate storage config

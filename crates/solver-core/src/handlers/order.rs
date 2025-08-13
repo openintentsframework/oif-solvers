@@ -5,21 +5,20 @@
 
 use crate::engine::event_bus::EventBus;
 use crate::state::OrderStateMachine;
-use crate::utils::truncate_id;
 use alloy_primitives::hex;
 use solver_delivery::DeliveryService;
 use solver_order::OrderService;
 use solver_storage::StorageService;
 use solver_types::{
-	DeliveryEvent, ExecutionParams, Intent, Order, OrderEvent, OrderStatus, SolverEvent,
-	StorageKey, TransactionType,
+	truncate_id, DeliveryEvent, ExecutionParams, Intent, Order, OrderEvent, OrderStatus,
+	SolverEvent, StorageKey, TransactionType,
 };
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
 
 /// Errors that can occur during order processing.
-/// 
+///
 /// These errors represent failures in service operations,
 /// storage operations, or state transitions during order handling.
 #[derive(Debug, Error)]
@@ -33,7 +32,7 @@ pub enum OrderError {
 }
 
 /// Handler for processing order preparation and execution.
-/// 
+///
 /// The OrderHandler manages the generation and submission of prepare
 /// transactions for off-chain orders and fill transactions for all orders,
 /// while updating order state and publishing relevant events.

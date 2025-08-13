@@ -3,20 +3,22 @@
 //! Responsible for validating intents, creating orders, storing them,
 //! and determining execution strategy through the order service.
 
-use crate::engine::{context::ContextBuilder, event_bus::EventBus};
+use crate::engine::{context::ContextBuilder, event_bus::EventBus, token_manager::TokenManager};
 use crate::state::OrderStateMachine;
-use crate::utils::truncate_id;
+use solver_config::Config;
+use solver_delivery::DeliveryService;
 use solver_order::OrderService;
 use solver_storage::StorageService;
 use solver_types::{
-	DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent, StorageKey,
+	truncate_id, Address, DiscoveryEvent, ExecutionDecision, Intent, OrderEvent, SolverEvent,
+	StorageKey,
 };
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
 
 /// Errors that can occur during intent processing.
-/// 
+///
 /// These errors represent failures in validating intents,
 /// storing them, or communicating with required services.
 #[derive(Debug, Error)]
@@ -30,7 +32,7 @@ pub enum IntentError {
 }
 
 /// Handler for processing discovered intents into executable orders.
-/// 
+///
 /// The IntentHandler validates incoming intents, creates orders from them,
 /// stores them in the persistence layer, and determines execution strategy
 /// through the order service.
@@ -39,20 +41,33 @@ pub struct IntentHandler {
 	storage: Arc<StorageService>,
 	state_machine: Arc<OrderStateMachine>,
 	event_bus: EventBus,
+	delivery: Arc<DeliveryService>,
+	solver_address: Address,
+	token_manager: Arc<TokenManager>,
+	config: Config,
 }
 
 impl IntentHandler {
+	#[allow(clippy::too_many_arguments)]
 	pub fn new(
 		order_service: Arc<OrderService>,
 		storage: Arc<StorageService>,
 		state_machine: Arc<OrderStateMachine>,
 		event_bus: EventBus,
+		delivery: Arc<DeliveryService>,
+		solver_address: Address,
+		token_manager: Arc<TokenManager>,
+		config: Config,
 	) -> Self {
 		Self {
 			order_service,
 			storage,
 			state_machine,
 			event_bus,
+			delivery,
+			solver_address,
+			token_manager,
+			config,
 		}
 	}
 
@@ -86,7 +101,11 @@ impl IntentHandler {
 		tracing::info!("Discovered intent");
 
 		// Validate intent
-		match self.order_service.validate_intent(&intent).await {
+		match self
+			.order_service
+			.validate_intent(&intent, &self.solver_address)
+			.await
+		{
 			Ok(order) => {
 				self.event_bus
 					.publish(SolverEvent::Discovery(DiscoveryEvent::IntentValidated {
@@ -108,7 +127,16 @@ impl IntentHandler {
 					.map_err(|e| IntentError::Storage(e.to_string()))?;
 
 				// Check execution strategy
-				let context = ContextBuilder::build().await;
+				let builder = ContextBuilder::new(
+					self.delivery.clone(),
+					self.solver_address.clone(),
+					self.token_manager.clone(),
+					self.config.clone(),
+				);
+				let context = builder
+					.build_execution_context(&intent)
+					.await
+					.map_err(|e| IntentError::Service(e.to_string()))?;
 				match self.order_service.should_execute(&order, &context).await {
 					ExecutionDecision::Execute(params) => {
 						self.event_bus

@@ -9,7 +9,7 @@ use alloy_primitives::{Address as AlloyAddress, FixedBytes, U256};
 use alloy_sol_types::{sol, SolCall, SolValue};
 use async_trait::async_trait;
 use solver_types::{
-	Address, ConfigSchema, Eip7683OrderData, ExecutionParams, Field, FieldType, FillProof, Intent,
+	Address, ConfigSchema, Eip7683OrderData, ExecutionParams, FillProof, Intent, NetworksConfig,
 	Order, OrderStatus, Schema, Transaction,
 };
 
@@ -81,16 +81,10 @@ sol! {
 ///
 /// # Fields
 ///
-/// * `output_settler_address` - Settler contract on destination chains for fills
-/// * `input_settler_address` - Settler contract on origin chain for claims
-/// * `solver_address` - Solver address for reward attribution
+/// * `networks` - Networks configuration containing settler addresses for each chain
 pub struct Eip7683OrderImpl {
-	/// Address of the output settler contract on destination chains.
-	output_settler_address: Address,
-	/// Address of the input settler contract on origin chains.
-	input_settler_address: Address,
-	/// Address of the solver for claiming rewards.
-	solver_address: Address,
+	/// Networks configuration for dynamic settler address lookups.
+	networks: NetworksConfig,
 }
 
 impl Eip7683OrderImpl {
@@ -98,38 +92,16 @@ impl Eip7683OrderImpl {
 	///
 	/// # Arguments
 	///
-	/// * `output_settler` - Hex-encoded address of the output settler contract
-	/// * `input_settler` - Hex-encoded address of the input settler contract
-	/// * `solver` - Hex-encoded address of the solver
-	///
-	/// # Panics
-	///
-	/// Panics if any of the provided addresses are invalid hex strings.
-	pub fn new(
-		output_settler: String,
-		input_settler: String,
-		solver: String,
-	) -> Result<Self, OrderError> {
-		let output_settler_address = Address(
-			hex::decode(output_settler.trim_start_matches("0x")).map_err(|e| {
-				OrderError::ValidationFailed(format!("Invalid output settler address: {}", e))
-			})?,
-		);
-		let input_settler_address = Address(
-			hex::decode(input_settler.trim_start_matches("0x")).map_err(|e| {
-				OrderError::ValidationFailed(format!("Invalid input settler address: {}", e))
-			})?,
-		);
-		let solver_address =
-			Address(hex::decode(solver.trim_start_matches("0x")).map_err(|e| {
-				OrderError::ValidationFailed(format!("Invalid solver address: {}", e))
-			})?);
+	/// * `networks` - Networks configuration with settler addresses
+	pub fn new(networks: NetworksConfig) -> Result<Self, OrderError> {
+		// Validate that networks config has at least 2 networks
+		if networks.len() < 2 {
+			return Err(OrderError::ValidationFailed(
+				"At least 2 networks must be configured".to_string(),
+			));
+		}
 
-		Ok(Self {
-			output_settler_address,
-			input_settler_address,
-			solver_address,
-		})
+		Ok(Self { networks })
 	}
 }
 
@@ -139,16 +111,15 @@ impl Eip7683OrderImpl {
 /// Ensures all addresses are valid Ethereum addresses in hex format.
 ///
 /// Configuration schema for EIP-7683 order implementation.
-/// 
+///
 /// This schema validates the configuration for the EIP-7683 order processor,
 /// ensuring all required addresses are present and properly formatted.
-/// 
+///
 /// # Required Configuration
 ///
 /// ```toml
 /// output_settler_address = "0x..."  # 42-char hex address
 /// input_settler_address = "0x..."   # 42-char hex address
-/// solver_address = "0x..."          # 42-char hex address
 /// ```
 pub struct Eip7683OrderSchema;
 
@@ -156,49 +127,7 @@ impl ConfigSchema for Eip7683OrderSchema {
 	fn validate(&self, config: &toml::Value) -> Result<(), solver_types::ValidationError> {
 		let schema = Schema::new(
 			// Required fields
-			vec![
-				Field::new("output_settler_address", FieldType::String).with_validator(|value| {
-					match value.as_str() {
-						Some(addr) => {
-							if addr.len() != 42 || !addr.starts_with("0x") {
-								return Err(
-									"output_settler_address must be a valid Ethereum address"
-										.to_string(),
-								);
-							}
-							Ok(())
-						}
-						None => Err("Expected string value for output_settler_address".to_string()),
-					}
-				}),
-				Field::new("input_settler_address", FieldType::String).with_validator(|value| {
-					match value.as_str() {
-						Some(addr) => {
-							if addr.len() != 42 || !addr.starts_with("0x") {
-								return Err(
-									"input_settler_address must be a valid Ethereum address"
-										.to_string(),
-								);
-							}
-							Ok(())
-						}
-						None => Err("Expected string value for input_settler_address".to_string()),
-					}
-				}),
-				Field::new("solver_address", FieldType::String).with_validator(|value| match value
-					.as_str()
-				{
-					Some(addr) => {
-						if addr.len() != 42 || !addr.starts_with("0x") {
-							return Err(
-								"solver_address must be a valid Ethereum address".to_string()
-							);
-						}
-						Ok(())
-					}
-					None => Err("Expected string value for solver_address".to_string()),
-				}),
-			],
+			vec![],
 			// Optional fields
 			vec![],
 		);
@@ -221,10 +150,11 @@ impl OrderInterface for Eip7683OrderImpl {
 	/// # Arguments
 	///
 	/// * `intent` - The intent to validate
+	/// * `solver_address` - The solver's address for reward attribution
 	///
 	/// # Returns
 	///
-	/// Returns a validated `Order` ready for processing.
+	/// Returns a validated `Order` ready for processing with the solver address included.
 	///
 	/// # Errors
 	///
@@ -232,7 +162,11 @@ impl OrderInterface for Eip7683OrderImpl {
 	/// - The intent is not an EIP-7683 order
 	/// - The order data cannot be parsed
 	/// - The order has expired
-	async fn validate_intent(&self, intent: &Intent) -> Result<Order, OrderError> {
+	async fn validate_intent(
+		&self,
+		intent: &Intent,
+		solver_address: &Address,
+	) -> Result<Order, OrderError> {
 		if intent.standard != "eip7683" {
 			return Err(OrderError::ValidationFailed(
 				"Not an EIP-7683 order".to_string(),
@@ -262,6 +196,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			created_at: intent.metadata.discovered_at,
 			data: serde_json::to_value(&order_data)
 				.map_err(|e| OrderError::ValidationFailed(format!("Failed to serialize: {}", e)))?,
+			solver_address: solver_address.clone(),
 			quote_id: intent.quote_id.clone(),
 			updated_at: std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
@@ -346,8 +281,22 @@ impl OrderInterface for Eip7683OrderImpl {
 		}
 		.abi_encode();
 
+		// Get the input settler address for the order's origin chain
+		let origin_chain_id = order_data.origin_chain_id.to::<u64>();
+		let input_settler_address = self
+			.networks
+			.get(&origin_chain_id)
+			.ok_or_else(|| {
+				OrderError::ValidationFailed(format!(
+					"Chain ID {} not found in networks configuration",
+					order_data.origin_chain_id
+				))
+			})?
+			.input_settler_address
+			.clone();
+
 		Ok(Some(Transaction {
-			to: Some(self.input_settler_address.clone()),
+			to: Some(input_settler_address),
 			data: open_for_data,
 			value: U256::ZERO,
 			chain_id: order_data.origin_chain_id.to::<u64>(),
@@ -403,12 +352,26 @@ impl OrderInterface for Eip7683OrderImpl {
 
 		let destination_chain_id = output.chain_id;
 
+		// Get the output settler address for the destination chain
+		let dest_chain_id = destination_chain_id.to::<u64>();
+		let output_settler_address = self
+			.networks
+			.get(&dest_chain_id)
+			.ok_or_else(|| {
+				OrderError::ValidationFailed(format!(
+					"Chain ID {} not found in networks configuration",
+					destination_chain_id
+				))
+			})?
+			.output_settler_address
+			.clone();
+
 		// Create the MandateOutput struct for the fill operation
 		let mandate_output = MandateOutput {
 			oracle: FixedBytes::<32>::from([0u8; 32]), // No oracle for direct fills
 			settler: {
 				let mut bytes32 = [0u8; 32];
-				bytes32[12..32].copy_from_slice(&self.output_settler_address.0);
+				bytes32[12..32].copy_from_slice(&output_settler_address.0);
 				FixedBytes::<32>::from(bytes32)
 			},
 			chainId: output.chain_id,
@@ -426,14 +389,14 @@ impl OrderInterface for Eip7683OrderImpl {
 			fillerData: {
 				// FillerData should contain the solver address as bytes32
 				let mut solver_bytes32 = [0u8; 32];
-				solver_bytes32[12..32].copy_from_slice(&self.solver_address.0);
+				solver_bytes32[12..32].copy_from_slice(&order.solver_address.0);
 				solver_bytes32.to_vec().into()
 			},
 		}
 		.abi_encode();
 
 		Ok(Transaction {
-			to: Some(self.output_settler_address.clone()),
+			to: Some(output_settler_address),
 			data: fill_data,
 			value: U256::ZERO,
 			chain_id: destination_chain_id.to::<u64>(),
@@ -505,19 +468,29 @@ impl OrderInterface for Eip7683OrderImpl {
 		let outputs: Vec<MandateOutput> = order_data
 			.outputs
 			.iter()
-			.map(|output| {
+			.map(|output| -> Result<MandateOutput, OrderError> {
 				// Use the oracle value from the original order
 				let oracle_bytes32 = FixedBytes::<32>::from(output.oracle);
 
 				let settler_bytes32 = {
 					let mut bytes32 = [0u8; 32];
-					if output.chain_id == order_data.origin_chain_id {
+					let output_chain_id = output.chain_id.to::<u64>();
+					let network = self.networks.get(&output_chain_id).ok_or_else(|| {
+						OrderError::ValidationFailed(format!(
+							"Chain ID {} not found in networks configuration",
+							output.chain_id
+						))
+					})?;
+
+					let settler_address = if output.chain_id == order_data.origin_chain_id {
 						// Use input settler for origin chain
-						bytes32[12..32].copy_from_slice(&self.input_settler_address.0);
+						&network.input_settler_address
 					} else {
 						// Use output settler for other chains
-						bytes32[12..32].copy_from_slice(&self.output_settler_address.0);
-					}
+						&network.output_settler_address
+					};
+
+					bytes32[12..32].copy_from_slice(&settler_address.0);
 					FixedBytes::<32>::from(bytes32)
 				};
 
@@ -525,7 +498,7 @@ impl OrderInterface for Eip7683OrderImpl {
 
 				let recipient_bytes32 = FixedBytes::<32>::from(output.recipient);
 
-				MandateOutput {
+				Ok(MandateOutput {
 					oracle: oracle_bytes32,
 					settler: settler_bytes32,
 					chainId: output.chain_id,
@@ -534,9 +507,9 @@ impl OrderInterface for Eip7683OrderImpl {
 					recipient: recipient_bytes32,
 					call: vec![].into(),
 					context: vec![].into(),
-				}
+				})
 			})
-			.collect();
+			.collect::<Result<Vec<_>, _>>()?;
 
 		// Build the order struct
 		let order_struct = OrderStruct {
@@ -555,12 +528,12 @@ impl OrderInterface for Eip7683OrderImpl {
 
 		// Create solver bytes32 array (single solver in this case)
 		let mut solver_bytes32 = [0u8; 32];
-		solver_bytes32[12..32].copy_from_slice(&self.solver_address.0);
+		solver_bytes32[12..32].copy_from_slice(&order.solver_address.0);
 		let solvers = vec![FixedBytes::<32>::from(solver_bytes32)];
 
 		// Create destination bytes32 (solver address for self-finalisation)
 		let mut destination_bytes32 = [0u8; 32];
-		destination_bytes32[12..32].copy_from_slice(&self.solver_address.0);
+		destination_bytes32[12..32].copy_from_slice(&order.solver_address.0);
 		let destination = FixedBytes::<32>::from(destination_bytes32);
 
 		// Empty call data for simple finalisation
@@ -576,8 +549,22 @@ impl OrderInterface for Eip7683OrderImpl {
 		}
 		.abi_encode();
 
+		// Get the input settler address for the order's origin chain
+		let origin_chain_id = order_data.origin_chain_id.to::<u64>();
+		let input_settler_address = self
+			.networks
+			.get(&origin_chain_id)
+			.ok_or_else(|| {
+				OrderError::ValidationFailed(format!(
+					"Chain ID {} not found in networks configuration",
+					order_data.origin_chain_id
+				))
+			})?
+			.input_settler_address
+			.clone();
+
 		Ok(Transaction {
-			to: Some(self.input_settler_address.clone()),
+			to: Some(input_settler_address),
 			data: call_data,
 			value: U256::ZERO,
 			chain_id: order_data.origin_chain_id.to::<u64>(),
@@ -597,7 +584,8 @@ impl OrderInterface for Eip7683OrderImpl {
 ///
 /// # Arguments
 ///
-/// * `config` - TOML configuration value containing required parameters
+/// * `config` - TOML configuration value (may be empty)
+/// * `networks` - Networks configuration with settler addresses
 ///
 /// # Returns
 ///
@@ -605,41 +593,15 @@ impl OrderInterface for Eip7683OrderImpl {
 ///
 /// # Configuration
 ///
-/// Required configuration parameters:
-/// ```toml
-/// output_settler_address = "0x..."  # Output settler contract address
-/// input_settler_address = "0x..."   # Input settler contract address
-/// solver_address = "0x..."          # Solver address for rewards
-/// ```
+/// No specific configuration required - networks config is passed separately.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if any required configuration parameter is missing.
-pub fn create_order_impl(config: &toml::Value) -> Result<Box<dyn OrderInterface>, OrderError> {
-	let output_settler = config
-		.get("output_settler_address")
-		.and_then(|v| v.as_str())
-		.ok_or_else(|| {
-			OrderError::ValidationFailed("output_settler_address is required".to_string())
-		})?;
-
-	let input_settler = config
-		.get("input_settler_address")
-		.and_then(|v| v.as_str())
-		.ok_or_else(|| {
-			OrderError::ValidationFailed("input_settler_address is required".to_string())
-		})?;
-
-	let solver_address = config
-		.get("solver_address")
-		.and_then(|v| v.as_str())
-		.ok_or_else(|| OrderError::ValidationFailed("solver_address is required".to_string()))?;
-
-	let order_impl = Eip7683OrderImpl::new(
-		output_settler.to_string(),
-		input_settler.to_string(),
-		solver_address.to_string(),
-	)?;
-
+/// Returns an error if networks configuration is invalid.
+pub fn create_order_impl(
+	_config: &toml::Value,
+	networks: &NetworksConfig,
+) -> Result<Box<dyn OrderInterface>, OrderError> {
+	let order_impl = Eip7683OrderImpl::new(networks.clone())?;
 	Ok(Box::new(order_impl))
 }

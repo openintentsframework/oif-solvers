@@ -7,21 +7,20 @@
 use crate::engine::event_bus::EventBus;
 use crate::monitoring::TransactionMonitor;
 use crate::state::OrderStateMachine;
-use crate::utils::truncate_id;
 use alloy_primitives::hex;
 use solver_delivery::DeliveryService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{
-	DeliveryEvent, Order, OrderEvent, OrderStatus, SolverEvent, StorageKey, TransactionHash,
-	TransactionReceipt, TransactionType,
+	truncate_id, DeliveryEvent, Order, OrderEvent, OrderStatus, SolverEvent, StorageKey,
+	TransactionHash, TransactionReceipt, TransactionType,
 };
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::instrument;
 
 /// Errors that can occur during transaction processing.
-/// 
+///
 /// These errors represent failures in storage operations,
 /// state transitions, or service operations during transaction handling.
 #[derive(Debug, Error)]
@@ -35,7 +34,7 @@ pub enum TransactionError {
 }
 
 /// Handler for managing blockchain transaction lifecycle.
-/// 
+///
 /// The TransactionHandler manages transaction confirmations, failures,
 /// and state transitions based on transaction type. It spawns monitoring
 /// tasks for pending transactions and coordinates with settlement monitoring.
