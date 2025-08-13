@@ -1,0 +1,480 @@
+#!/bin/bash
+
+# OIF Solver Testnet Environment Setup Script
+# ===========================================
+#
+# This script sets up a complete testnet testing environment for the OIF cross-chain solver.
+# It performs the following operations:
+#
+# 1. Generates a new solver keypair automatically (if not already exists)
+# 2. Deploys smart contracts on both testnets:
+#    - InputSettlerEscrow on Ethereum Sepolia (origin chain)
+#    - OutputSettler7683 on Base Sepolia (destination chain)
+#    - Mock Oracle contract for intent validation
+#
+# 3. Configures the test environment for USDC transfers:
+#    - Uses USDC on both chains (requires token balances)
+#    - Generates configuration file (config/demo.toml) for the solver
+#
+# After running this script, you can:
+# - Start the solver with: cargo run --bin solver-service -- --config config/demo.toml
+# - Send onchain test intents using: ./scripts/demo/send_onchain_intent.sh
+# - Send offchain test intents using: ./scripts/demo/send_offchain_intent.sh
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# ============================================================================
+# CONFIGURATION - UPDATE THESE VALUES
+# ============================================================================
+
+# RPC URLs for the testnets (you can use public endpoints or private RPCs if you have them)
+ORIGIN_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
+DEST_RPC_URL="https://sepolia.base.org"
+
+# Chain IDs
+ORIGIN_CHAIN_ID=11155111  # Ethereum Sepolia
+DEST_CHAIN_ID=84532       # Base Sepolia
+
+# USDC Token Addresses
+ORIGIN_USDC_ADDRESS="0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"  # USDC on Ethereum Sepolia
+DEST_USDC_ADDRESS="0x036CbD53842c5426634e7929541eC2318f3dCF7e"    # USDC on Base Sepolia
+
+# Load environment variables from .env file
+load_env_file() {
+    local env_file=".env"
+    
+    if [ ! -f "$env_file" ]; then
+        echo -e "${RED}❌ Error: .env file not found${NC}"
+        echo
+        echo -e "${YELLOW}Please create a .env file with your deployment private key:${NC}"
+        echo "  DEPLOYMENT_PRIVATE_KEY=0x_your_64_character_hex_key_here"
+        echo
+        echo -e "${YELLOW}Get your private key from MetaMask:${NC}"
+        echo "  Account Details > Export Private Key"
+        echo "  WARNING: Only use testnet accounts, NEVER mainnet keys!"
+        exit 1
+    fi
+    
+    # Load only DEPLOYMENT_PRIVATE_KEY from .env file
+    DEPLOYMENT_PRIVATE_KEY=$(grep "^DEPLOYMENT_PRIVATE_KEY=" "$env_file" | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//')
+    
+    if [ -z "$DEPLOYMENT_PRIVATE_KEY" ]; then
+        echo -e "${RED}❌ Error: DEPLOYMENT_PRIVATE_KEY not found in .env file${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓${NC} Loaded DEPLOYMENT_PRIVATE_KEY from .env"
+}
+
+# Generate solver keypair (without saving to file)
+generate_solver_keypair() {
+    echo -e "${YELLOW}🔑 Generating new solver keypair...${NC}"
+    
+    # Generate new keypair using cast (temporary, not saved)
+    KEYPAIR_OUTPUT=$(cast wallet new 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to generate keypair${NC}"
+        echo "Output: $KEYPAIR_OUTPUT"
+        exit 1
+    fi
+    
+    # Extract address and private key from output
+    SOLVER_ADDRESS=$(echo "$KEYPAIR_OUTPUT" | grep "Address:" | awk '{print $2}')
+    SOLVER_PRIVATE_KEY=$(echo "$KEYPAIR_OUTPUT" | grep "Private key:" | awk '{print $3}')
+    
+    if [ -z "$SOLVER_ADDRESS" ] || [ -z "$SOLVER_PRIVATE_KEY" ]; then
+        echo -e "${RED}Failed to parse generated keypair${NC}"
+        echo "Output: $KEYPAIR_OUTPUT"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓${NC} Generated new solver keypair"
+    echo "  Address:     $SOLVER_ADDRESS"
+    echo "  Private Key: ${SOLVER_PRIVATE_KEY:0:10}...${SOLVER_PRIVATE_KEY: -4}"
+}
+
+# Validate configuration
+validate_config() {
+    local errors=()
+    
+    # Check if DEPLOYMENT_PRIVATE_KEY is set
+    if [ -z "$DEPLOYMENT_PRIVATE_KEY" ]; then
+        errors+=("DEPLOYMENT_PRIVATE_KEY not found - please add it to your .env file")
+    elif [[ ! "$DEPLOYMENT_PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        errors+=("DEPLOYMENT_PRIVATE_KEY has invalid format - should be 0x followed by 64 hex characters")
+    fi
+    
+    if [ ${#errors[@]} -ne 0 ]; then
+        echo -e "${RED}Configuration errors found:${NC}"
+        for error in "${errors[@]}"; do
+            echo "  ❌ $error"
+        done
+        echo
+        echo -e "${YELLOW}Please update your .env file with the correct values.${NC}"
+        exit 1
+    fi
+}
+
+echo -e "${BLUE}🔧 Testnet USDC Setup (Sepolia + Base Sepolia)${NC}"
+echo "================================================"
+
+# Load environment variables first
+load_env_file
+
+# Validate configuration
+validate_config
+
+# Generate solver keypair
+generate_solver_keypair
+
+# Account configuration
+DEPLOYMENT_KEY="$DEPLOYMENT_PRIVATE_KEY"
+DEPLOYER_ADDRESS=$(cast wallet address --private-key $DEPLOYMENT_KEY)
+
+# Solver configuration (now loaded from generated/existing keypair)
+USER_ADDRESS="$SOLVER_ADDRESS"       # For testing, user = solver
+USER_PRIVATE_KEY="$SOLVER_PRIVATE_KEY"
+RECIPIENT_ADDR="$SOLVER_ADDRESS"     # For testing, recipient = solver
+
+# USDC Token addresses
+ORIGIN_TOKEN="$ORIGIN_USDC_ADDRESS"
+DEST_TOKEN="$DEST_USDC_ADDRESS"
+
+# Contract addresses
+ORIGIN_COMPACT_ADDRESS=""
+ORIGIN_PERMIT2_ADDRESS="0x000000000022D473030F116dDEE9F6B43aC78BA3"
+DEST_PERMIT2_ADDRESS="0x000000000022D473030F116dDEE9F6B43aC78BA3"
+OIF_PINNED_COMMIT="f2a9e8ab9d652894a090814421a7acb9a0547737"
+
+echo
+echo -e "${GREEN}✅ Configuration validated${NC}"
+echo "  Origin Chain:      Ethereum Sepolia (Chain ID: $ORIGIN_CHAIN_ID)"
+echo "  Destination Chain: Base Sepolia (Chain ID: $DEST_CHAIN_ID)"
+echo "  Deployer Address:  $DEPLOYER_ADDRESS"
+echo "  Solver Address:    $SOLVER_ADDRESS (Generated)"
+echo "  Asset:             USDC on both chains"
+echo "  Origin USDC:       $ORIGIN_USDC_ADDRESS"
+echo "  Destination USDC:  $DEST_USDC_ADDRESS"
+echo
+
+# Verify network connectivity
+echo -e "${YELLOW}1. Verifying network connectivity...${NC}"
+echo "  Debug: ORIGIN_RPC_URL = $ORIGIN_RPC_URL"
+echo "  Debug: DEST_RPC_URL = $DEST_RPC_URL"
+echo -n "  Testing Sepolia RPC... "
+
+# Test if cast command exists
+if ! command -v cast &> /dev/null; then
+    echo -e "${RED}Failed${NC}"
+    echo "Error: 'cast' command not found. Please install Foundry: https://getfoundry.sh/"
+    exit 1
+fi
+
+# Test the RPC connection with more verbose output
+if cast chain-id --rpc-url "$ORIGIN_RPC_URL" > /dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}Failed${NC}"
+    echo "Debug: Trying to connect to: $ORIGIN_RPC_URL"
+    echo "Debug: Cast command output:"
+    cast chain-id --rpc-url "$ORIGIN_RPC_URL" 2>&1 || true
+    echo "Please check your SEPOLIA_RPC_URL in the script configuration"
+    exit 1
+fi
+
+echo -n "  Testing Base Sepolia RPC... "
+if cast chain-id --rpc-url "$DEST_RPC_URL" > /dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}Failed${NC}"
+    echo "Please check your BASE_SEPOLIA_RPC_URL in the script configuration"
+    exit 1
+fi
+
+# Check deployer balances (ETH for gas + USDC for testing)
+echo -e "${YELLOW}2. Checking deployer balances...${NC}"
+DEPLOYER_ORIGIN_BALANCE=$(cast balance $DEPLOYER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" --ether 2>/dev/null || echo "0")
+DEPLOYER_DEST_BALANCE=$(cast balance $DEPLOYER_ADDRESS --rpc-url "$DEST_RPC_URL" --ether 2>/dev/null || echo "0")
+
+# Check USDC balances
+DEPLOYER_ORIGIN_USDC=$(cast call $ORIGIN_USDC_ADDRESS "balanceOf(address)(uint256)" $DEPLOYER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
+DEPLOYER_DEST_USDC=$(cast call $DEST_USDC_ADDRESS "balanceOf(address)(uint256)" $DEPLOYER_ADDRESS --rpc-url "$DEST_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
+
+echo "  Deployer Sepolia ETH:      ${DEPLOYER_ORIGIN_BALANCE} ETH"
+echo "  Deployer Base Sepolia ETH: ${DEPLOYER_DEST_BALANCE} ETH"
+echo "  Deployer Sepolia USDC:     ${DEPLOYER_ORIGIN_USDC} USDC"
+echo "  Deployer Base Sepolia USDC:${DEPLOYER_DEST_USDC} USDC"
+
+# Check solver balances
+echo -e "${YELLOW}3. Checking solver balances...${NC}"
+SOLVER_ORIGIN_BALANCE=$(cast balance $SOLVER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" --ether 2>/dev/null || echo "0")
+SOLVER_DEST_BALANCE=$(cast balance $SOLVER_ADDRESS --rpc-url "$DEST_RPC_URL" --ether 2>/dev/null || echo "0")
+
+# Check solver USDC balances
+SOLVER_ORIGIN_USDC=$(cast call $ORIGIN_USDC_ADDRESS "balanceOf(address)(uint256)" $SOLVER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
+SOLVER_DEST_USDC=$(cast call $DEST_USDC_ADDRESS "balanceOf(address)(uint256)" $SOLVER_ADDRESS --rpc-url "$DEST_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
+
+echo "  Solver Sepolia ETH:        ${SOLVER_ORIGIN_BALANCE} ETH"
+echo "  Solver Base Sepolia ETH:   ${SOLVER_DEST_BALANCE} ETH"
+echo "  Solver Sepolia USDC:       ${SOLVER_ORIGIN_USDC} USDC"
+echo "  Solver Base Sepolia USDC:  ${SOLVER_DEST_USDC} USDC"
+
+# Check if solver has sufficient balances for operation
+MIN_SOLVER_USDC="1"  # Reduced from 10 to 2 since we're only sending 1 USDC
+if (( $(echo "$SOLVER_DEST_USDC < $MIN_SOLVER_USDC" | bc -l) )); then
+    echo -e "${YELLOW}⚠️  Solver needs USDC on Base Sepolia to fulfill orders!${NC}"
+    echo "   Solver address: $SOLVER_ADDRESS"
+    echo "   Recommended: at least $MIN_SOLVER_USDC USDC for testing"
+    echo "   Send USDC to this address before starting the solver"
+    echo
+fi
+
+echo -e "${GREEN}✓${NC} Sufficient deployer balances for deployment"
+
+# Step 4: Deploy contracts
+echo
+echo -e "${YELLOW}4. Deploying contracts...${NC}"
+
+# Clone or update oif-contracts to specific commit
+if [ ! -d "oif-contracts" ]; then
+    echo -n "  Cloning oif-contracts... "
+    git clone https://github.com/openintentsframework/oif-contracts.git > /dev/null 2>&1
+    echo -e "${GREEN}✓${NC}"
+fi
+
+cd oif-contracts
+echo -n "  Checking out oif-contracts commit ${OIF_PINNED_COMMIT}... "
+git fetch origin > /dev/null 2>&1
+git checkout ${OIF_PINNED_COMMIT} > /dev/null 2>&1
+echo -e "${GREEN}✓${NC}"
+
+# Deploy contracts on origin chain (Sepolia) using deployer key
+echo -e "${BLUE}=== Ethereum Sepolia Deployments ===${NC}"
+
+# Deploy Oracle from actual contract
+echo -n "  Deploying AlwaysYesOracle... "
+ORACLE_OUTPUT=$(~/.foundry/bin/forge create test/mocks/AlwaysYesOracle.sol:AlwaysYesOracle \
+    --rpc-url "$ORIGIN_RPC_URL" \
+    --private-key $DEPLOYMENT_KEY \
+    --broadcast 2>&1)
+ORACLE=$(echo "$ORACLE_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
+if [ -z "$ORACLE" ]; then
+    echo -e "${RED}Failed to deploy oracle${NC}"
+    echo "Oracle output: $ORACLE_OUTPUT"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $ORACLE"
+
+# Deploy InputSettlerEscrow
+echo -n "  Deploying InputSettlerEscrow... "
+INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
+    --rpc-url "$ORIGIN_RPC_URL" \
+    --private-key $DEPLOYMENT_KEY \
+    --broadcast 2>&1)
+INPUT_SETTLER=$(echo "$INPUT_SETTLER_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
+if [ -z "$INPUT_SETTLER" ]; then
+    echo -e "${RED}Failed to deploy InputSettler${NC}"
+    echo "InputSettler output: $INPUT_SETTLER_OUTPUT"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $INPUT_SETTLER"
+
+# Deploy OutputSettler on destination chain (Base Sepolia) using deployer key
+echo
+echo -e "${BLUE}=== Base Sepolia Deployments ===${NC}"
+
+echo -n "  Deploying OutputSettler... "
+OUTPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/output/coin/OutputSettler7683.sol:OutputInputSettlerEscrow \
+    --rpc-url "$DEST_RPC_URL" \
+    --private-key $DEPLOYMENT_KEY \
+    --broadcast 2>&1)
+OUTPUT_SETTLER=$(echo "$OUTPUT_SETTLER_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
+if [ -z "$OUTPUT_SETTLER" ]; then
+    echo -e "${RED}Failed to deploy OutputSettler${NC}"
+    echo "OutputSettler output: $OUTPUT_SETTLER_OUTPUT"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $OUTPUT_SETTLER"
+
+cd ..
+
+# Step 5: Create config file (using solver private key for operations)
+echo
+echo -e "${YELLOW}5. Creating config file...${NC}"
+
+mkdir -p config
+
+cat > config/demo.toml << EOF
+# OIF Solver Configuration - Testnet USDC Setup (Sepolia + Base Sepolia)
+
+[solver]
+id = "oif-solver-testnet-usdc"
+monitoring_timeout_minutes = 5
+
+[storage]
+primary = "file"
+cleanup_interval_seconds = 3600
+
+[storage.implementations.memory]
+# Memory storage has no configuration
+
+[storage.implementations.file]
+storage_path = "./data/storage"
+ttl_orders = 0                  # Permanent
+ttl_intents = 86400             # 24 hours
+ttl_order_by_tx_hash = 86400    # 24 hours
+
+[account]
+provider = "local"
+[account.config]
+private_key = "$SOLVER_PRIVATE_KEY"  # Auto-generated solver private key
+
+[delivery]
+min_confirmations = 3  # Higher confirmations for testnets
+[delivery.providers.origin]
+rpc_url = "$ORIGIN_RPC_URL"
+private_key = "$SOLVER_PRIVATE_KEY"  # Solver signs transactions
+chain_id = $ORIGIN_CHAIN_ID
+
+[delivery.providers.destination]
+rpc_url = "$DEST_RPC_URL"
+private_key = "$SOLVER_PRIVATE_KEY"  # Solver signs transactions
+chain_id = $DEST_CHAIN_ID
+
+[discovery]
+[discovery.sources.onchain_eip7683]
+rpc_url = "$ORIGIN_RPC_URL"
+settler_addresses = ["$INPUT_SETTLER"]
+
+[discovery.sources.offchain_eip7683]
+api_host = "127.0.0.1"
+api_port = 8081
+rpc_url = "$ORIGIN_RPC_URL"
+settler_address = "$INPUT_SETTLER"
+
+[order]
+[order.implementations.eip7683]
+output_settler_address = "$OUTPUT_SETTLER"
+input_settler_address = "$INPUT_SETTLER"
+solver_address = "$SOLVER_ADDRESS"
+
+[order.execution_strategy]
+strategy_type = "simple"
+[order.execution_strategy.config]
+max_gas_price_gwei = 100
+
+[settlement]
+[settlement.domain]
+chain_id = $ORIGIN_CHAIN_ID
+address = "$INPUT_SETTLER"
+[settlement.implementations.eip7683]
+rpc_url = "$DEST_RPC_URL"
+oracle_address = "$ORACLE"
+dispute_period_seconds = 60
+
+[api]
+enabled = true
+host = "127.0.0.1"
+port = 3000
+timeout_seconds = 30
+max_request_size = 1048576
+
+# Contract addresses for testing (used by demo scripts)
+[contracts.origin]
+chain_id = $ORIGIN_CHAIN_ID
+rpc_url = "$ORIGIN_RPC_URL"
+token = "$ORIGIN_TOKEN"
+input_settler = "$INPUT_SETTLER"
+the_compact = "$ORIGIN_COMPACT_ADDRESS"
+permit2 = "$ORIGIN_PERMIT2_ADDRESS"
+oracle = "$ORACLE"
+
+[contracts.destination]
+chain_id = $DEST_CHAIN_ID
+rpc_url = "$DEST_RPC_URL"
+token = "$DEST_TOKEN"
+output_settler = "$OUTPUT_SETTLER"
+permit2 = "$DEST_PERMIT2_ADDRESS"
+
+[accounts]
+solver = "$SOLVER_ADDRESS"
+user = "$USER_ADDRESS"
+user_private_key = "$USER_PRIVATE_KEY"
+recipient = "$RECIPIENT_ADDR"
+EOF
+
+# Done!
+echo
+echo -e "${GREEN}✅ Setup complete!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo
+echo -e "${BLUE}🔗 Networks:${NC}"
+echo "  Origin:      Ethereum Sepolia (Chain ID: $ORIGIN_CHAIN_ID)"
+echo "  Destination: Base Sepolia (Chain ID: $DEST_CHAIN_ID)"
+echo
+echo -e "${BLUE}🌐 RPC Endpoints:${NC}"
+echo "  Sepolia:     $ORIGIN_RPC_URL"
+echo "  Base Sepolia: $DEST_RPC_URL"
+echo
+echo -e "${BLUE}💎 Asset:${NC}"
+echo "  USDC on both chains"
+echo "  Origin USDC:      $ORIGIN_USDC_ADDRESS"
+echo "  Destination USDC: $DEST_USDC_ADDRESS"
+echo
+echo -e "${BLUE}📋 Contracts:${NC}"
+echo "  Ethereum Sepolia:"
+echo "    InputSettler: $INPUT_SETTLER"
+echo "    Oracle:       $ORACLE"
+echo "    USDC Token:   $ORIGIN_USDC_ADDRESS"
+echo "  Base Sepolia:"
+echo "    OutputSettler: $OUTPUT_SETTLER"
+echo "    USDC Token:    $DEST_USDC_ADDRESS"
+echo
+echo -e "${BLUE}👥 Addresses:${NC}"
+echo "  Deployer (MetaMask): $DEPLOYER_ADDRESS"
+echo "  Solver (Generated):  $SOLVER_ADDRESS"
+echo
+echo -e "${BLUE}💰 Current Balances:${NC}"
+echo "  Deployer Sepolia ETH:      ${DEPLOYER_ORIGIN_BALANCE} ETH"
+echo "  Deployer Base Sepolia ETH: ${DEPLOYER_DEST_BALANCE} ETH"
+echo "  Deployer Sepolia USDC:     ${DEPLOYER_ORIGIN_USDC} USDC"
+echo "  Deployer Base Sepolia USDC:${DEPLOYER_DEST_USDC} USDC"
+echo "  Solver Sepolia ETH:        ${SOLVER_ORIGIN_BALANCE} ETH"
+echo "  Solver Base Sepolia ETH:   ${SOLVER_DEST_BALANCE} ETH"
+echo "  Solver Sepolia USDC:       ${SOLVER_ORIGIN_USDC} USDC"
+echo "  Solver Base Sepolia USDC:  ${SOLVER_DEST_USDC} USDC"
+echo
+echo -e "${BLUE}📋 Files Created:${NC}"
+echo "  Config:      config/demo.toml"
+echo
+
+echo -e "${BLUE}🔑 Generated Solver Keypair (SAVE THIS INFORMATION):${NC}"
+echo "  Address:     $SOLVER_ADDRESS"
+echo "  Private Key: $SOLVER_PRIVATE_KEY"
+echo -e "${YELLOW}  ⚠️  WARNING: Save this private key securely! It won't be saved to any file.${NC}"
+echo
+
+echo -e "${YELLOW}To start the solver:${NC}"
+echo "  cargo run --bin solver-service -- --config config/demo.toml"
+echo
+
+echo -e "${BLUE}💡 Next Steps:${NC}"
+echo "  1. SAVE the solver keypair shown above!"
+echo "  2. Fund the solver address with USDC on Base Sepolia:"
+echo "     Address: $SOLVER_ADDRESS"
+echo "     Recommended: at least $MIN_SOLVER_USDC USDC for testing"
+echo "  3. Ensure you have USDC on Sepolia for test transactions (need >1 USDC)"
+echo "  4. Start the solver service"
+echo
+echo -e "${BLUE}💡 Getting Testnet USDC:${NC}"
+echo "  Sepolia USDC Faucet: Use Circle's testnet faucet or bridge from other testnets"
+echo "  Base Sepolia USDC: Bridge from Sepolia using https://bridge.base.org/"
+echo "  Alternative: Use Relay.link for testnet USDC bridging"
+echo
+echo -e "${GREEN}🎉 Testnet setup completed!${NC}"
