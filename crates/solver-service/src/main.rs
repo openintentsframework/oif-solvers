@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tracing::info!("Started solver");
 
 	// Load configuration
-	let config = Config::from_file(args.config.to_str().unwrap())?;
+	let config = Config::from_file_async(args.config.to_str().unwrap()).await?;
 	tracing::info!("Loaded configuration [{}]", config.solver.id);
 
 	// Build solver engine with implementations

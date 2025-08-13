@@ -492,7 +492,7 @@ ttl_order_by_tx_hash = 86400    # 24 hours
 [account]
 provider = "local"
 [account.config]
-private_key = "$PRIVATE_KEY"
+private_key = "\${ETH_PRIVATE_KEY:-$PRIVATE_KEY}"
 
 # ============================================================================
 # DELIVERY - References networks by ID
