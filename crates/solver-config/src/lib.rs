@@ -17,11 +17,19 @@ pub enum ConfigError {
 	#[error("IO error: {0}")]
 	Io(#[from] std::io::Error),
 	/// Error that occurs when parsing TOML configuration.
-	#[error("Parse error: {0}")]
-	Parse(#[from] toml::de::Error),
+	#[error("Configuration error: {0}")]
+	Parse(String),
 	/// Error that occurs when configuration validation fails.
 	#[error("Validation error: {0}")]
 	Validation(String),
+}
+
+impl From<toml::de::Error> for ConfigError {
+	fn from(err: toml::de::Error) -> Self {
+		// Extract just the message without the huge input dump
+		let message = err.message().to_string();
+		ConfigError::Parse(message)
+	}
 }
 
 /// Main configuration structure for the OIF solver.
