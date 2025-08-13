@@ -317,8 +317,11 @@ cat > config/demo.toml << EOF
 id = "oif-solver-testnet-usdc"
 monitoring_timeout_minutes = 5
 
-# Networks configuration
+# ============================================================================
+# NETWORKS - Central configuration for all chains
+# ============================================================================
 [networks.$ORIGIN_CHAIN_ID]
+rpc_url = "$ORIGIN_RPC_URL"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
 [[networks.$ORIGIN_CHAIN_ID.tokens]]
@@ -327,6 +330,7 @@ symbol = "USDC"
 decimals = 6
 
 [networks.$DEST_CHAIN_ID]
+rpc_url = "$DEST_RPC_URL"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
 [[networks.$DEST_CHAIN_ID.tokens]]
@@ -334,6 +338,9 @@ address = "$DEST_USDC_ADDRESS"
 symbol = "USDC"
 decimals = 6
 
+# ============================================================================
+# STORAGE
+# ============================================================================
 [storage]
 primary = "file"
 cleanup_interval_seconds = 3600
@@ -347,54 +354,71 @@ ttl_orders = 0                  # Permanent
 ttl_intents = 86400             # 24 hours
 ttl_order_by_tx_hash = 86400    # 24 hours
 
+# ============================================================================
+# ACCOUNT
+# ============================================================================
 [account]
 provider = "local"
 [account.config]
 private_key = "$SOLVER_PRIVATE_KEY"  # Auto-generated solver private key
 
+# ============================================================================
+# DELIVERY - References networks by ID
+# ============================================================================
 [delivery]
 min_confirmations = 3  # Higher confirmations for testnets
+
 [delivery.providers.origin]
-rpc_url = "$ORIGIN_RPC_URL"
-private_key = "$SOLVER_PRIVATE_KEY"  # Solver signs transactions
-chain_id = $ORIGIN_CHAIN_ID
+network_id = $ORIGIN_CHAIN_ID  # References networks.$ORIGIN_CHAIN_ID for RPC URL and chain ID
+# private_key omitted - uses account.config.private_key by default
 
 [delivery.providers.destination]
-rpc_url = "$DEST_RPC_URL"
-private_key = "$SOLVER_PRIVATE_KEY"  # Solver signs transactions
-chain_id = $DEST_CHAIN_ID
+network_id = $DEST_CHAIN_ID  # References networks.$DEST_CHAIN_ID
+# private_key omitted - uses account.config.private_key by default
 
+# ============================================================================
+# DISCOVERY - References networks for chain-specific sources
+# ============================================================================
 [discovery]
+
 [discovery.sources.onchain_eip7683]
-rpc_url = "$ORIGIN_RPC_URL"
-chain_id = $ORIGIN_CHAIN_ID
+network_id = $ORIGIN_CHAIN_ID  # Required: specifies which chain to monitor
 
 [discovery.sources.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
-rpc_url = "$ORIGIN_RPC_URL"
+network_ids = [$ORIGIN_CHAIN_ID]  # Optional: declares multi-chain support
 # auth_token = "your-secret-token"
 
+# ============================================================================
+# ORDER
+# ============================================================================
 [order]
 [order.implementations.eip7683]
-# No config needed - uses networks config
+# Uses networks config for all chain-specific settings
 
 [order.execution_strategy]
 strategy_type = "simple"
 [order.execution_strategy.config]
 max_gas_price_gwei = 100
 
+# ============================================================================
+# SETTLEMENT - References networks for chain config
+# ============================================================================
 [settlement]
 [settlement.domain]
 # Domain configuration for EIP-712 signatures in quotes
-chain_id = 1  # Ethereum mainnet
+chain_id = 1  # Ethereum mainnet for signature domain
 address = "$INPUT_SETTLER"
+
 [settlement.implementations.eip7683]
-rpc_url = "$DEST_RPC_URL"
-oracle_address = "$ORACLE"
+network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]  # Monitor multiple chains for oracle verification
+oracle_addresses = { $ORIGIN_CHAIN_ID = "$ORACLE", $DEST_CHAIN_ID = "$ORACLE" }
 dispute_period_seconds = 60
 
-# API server configuration
+# ============================================================================
+# API SERVER
+# ============================================================================
 [api]
 enabled = true
 host = "127.0.0.1"
