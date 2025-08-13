@@ -15,43 +15,42 @@ use super::validation::SupportedAsset;
 /// For each output token, queries the current solver balance via TokenManager
 /// and verifies it is greater than or equal to the requested amount.
 pub async fn ensure_destination_balances(
-    solver: &SolverEngine,
-    outputs: &[SupportedAsset],
+	solver: &SolverEngine,
+	outputs: &[SupportedAsset],
 ) -> Result<(), QuoteError> {
-    let token_manager = solver.token_manager();
+	let token_manager = solver.token_manager();
 
-    for out in outputs {
-        // Build solver-types Address from alloy address bytes
-        let token_addr = SolverAddress(out.evm_address.as_slice().to_vec());
+	for out in outputs {
+		// Build solver-types Address from alloy address bytes
+		let token_addr = SolverAddress(out.evm_address.as_slice().to_vec());
 
-        let balance_str = token_manager
-            .check_balance(out.chain_id, &token_addr)
-            .await
-            .map_err(|e| QuoteError::Internal(format!("Balance check failed: {}", e)))?;
+		let balance_str = token_manager
+			.check_balance(out.chain_id, &token_addr)
+			.await
+			.map_err(|e| QuoteError::Internal(format!("Balance check failed: {}", e)))?;
 
-        let balance = U256::from_str_radix(&balance_str, 10)
-            .map_err(|e| QuoteError::Internal(format!("Failed to parse balance: {}", e)))?;
+		let balance = U256::from_str_radix(&balance_str, 10)
+			.map_err(|e| QuoteError::Internal(format!("Failed to parse balance: {}", e)))?;
 
-        if balance < out.amount {
-            tracing::info!(
-                chain_id = out.chain_id,
-                required = %out.amount,
-                available = %balance,
-                token = %format!("0x{}", hex::encode(out.evm_address.as_slice())),
-                "Insufficient destination balance"
-            );
-            return Err(QuoteError::InsufficientLiquidity);
-        } else {
-            tracing::debug!(
-                chain_id = out.chain_id,
-                required = %out.amount,
-                available = %balance,
-                token = %format!("0x{}", hex::encode(out.evm_address.as_slice())),
-                "Sufficient destination balance"
-            );
-        }
-    }
+		if balance < out.amount {
+			tracing::info!(
+				chain_id = out.chain_id,
+				required = %out.amount,
+				available = %balance,
+				token = %format!("0x{}", hex::encode(out.evm_address.as_slice())),
+				"Insufficient destination balance"
+			);
+			return Err(QuoteError::InsufficientLiquidity);
+		} else {
+			tracing::debug!(
+				chain_id = out.chain_id,
+				required = %out.amount,
+				available = %balance,
+				token = %format!("0x{}", hex::encode(out.evm_address.as_slice())),
+				"Sufficient destination balance"
+			);
+		}
+	}
 
-    Ok(())
+	Ok(())
 }
-

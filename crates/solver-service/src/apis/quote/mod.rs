@@ -3,8 +3,8 @@
 //! This module contains the core business logic for quote processing,
 //! separated from the HTTP API layer for better maintainability and testing.
 
-pub mod custody;
 pub mod capability;
+pub mod custody;
 pub mod generation;
 pub mod validation;
 
@@ -13,6 +13,7 @@ pub use generation::QuoteGenerator;
 pub use validation::QuoteValidator;
 
 // Main API function
+use self::capability::ensure_destination_balances;
 use solver_config::Config;
 use solver_core::SolverEngine;
 use solver_types::{GetQuoteRequest, GetQuoteResponse, Quote, QuoteError, StorageKey};
@@ -36,37 +37,23 @@ pub async fn process_quote_request(
 	// 1. Validate the request
 	QuoteValidator::validate_request(&request)?;
 
-    // 2. Check solver capabilities / supported networks & tokens policy
-    QuoteValidator::validate_supported_networks(&request, solver)?;
-    QuoteValidator::validate_supported_tokens(&request, solver)?;
+	// 2. Check solver capabilities: networks only (token support is enforced during collection below)
+	QuoteValidator::validate_supported_networks(&request, solver)?;
 
-    // 3. Collect supported assets for this request (for later use: balances/custody/pricing)
-    let (supported_inputs, supported_outputs) = (
-        crate::apis::quote::validation::QuoteValidator::collect_supported_available_inputs(
-            &request,
-            solver,
-        )?,
-        crate::apis::quote::validation::QuoteValidator::validate_and_collect_requested_outputs(
-            &request,
-            solver,
-        )?,
-    );
+	// 3. Collect supported assets for this request (for later use: balances/custody/pricing)
+	let (_supported_inputs, supported_outputs) = (
+		QuoteValidator::collect_supported_available_inputs(&request, solver)?,
+		QuoteValidator::validate_and_collect_requested_outputs(&request, solver)?,
+	);
 
-    // Check destination balances for required outputs
-    super::quote::capability::ensure_destination_balances(solver, &supported_outputs).await?;
+	// Check destination balances for required outputs
+	ensure_destination_balances(solver, &supported_outputs).await?;
 
-    // Log collected sets
-    tracing::info!(
-        supported_inputs = ?supported_inputs,
-        supported_outputs = ?supported_outputs,
-        "Validated supported assets and balances for quote"
-    );
+	// 4. Generate quotes using the business logic layer
+	let quote_generator = QuoteGenerator::new();
+	let quotes = quote_generator.generate_quotes(&request, config).await?;
 
-    // 4. Generate quotes using the business logic layer
-    let quote_generator = QuoteGenerator::new();
-    let quotes = quote_generator.generate_quotes(&request, config).await?;
-
-    // 5. Persist quotes
+	// 5. Persist quotes
 	let quote_ttl = Duration::from_secs(300);
 	store_quotes(solver, &quotes, quote_ttl).await;
 

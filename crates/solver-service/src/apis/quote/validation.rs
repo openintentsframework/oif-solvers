@@ -13,10 +13,11 @@ pub struct QuoteValidator;
 /// Representation of a token amount on a specific chain that the solver supports
 #[derive(Debug, Clone)]
 pub struct SupportedAsset {
-    pub chain_id: u64,
-    pub evm_address: AlloyAddress,
-    pub interop: InteropAddress,
-    pub amount: U256,
+	pub chain_id: u64,
+	pub evm_address: AlloyAddress,
+	#[allow(dead_code)]
+	pub interop: InteropAddress,
+	pub amount: U256,
 }
 
 impl QuoteValidator {
@@ -53,21 +54,21 @@ impl QuoteValidator {
 			}
 		}
 
-        // Validate available inputs (origin chains): at least one supported
-        let mut supported_input_found = false;
-        for input in &request.available_inputs {
-            let chain_id = Self::chain_id_from_interop(&input.asset)?;
-            tracing::info!("Checking input chain ID: {}", chain_id);
-            if origin_supported.contains(&chain_id) {
-                supported_input_found = true;
-                break;
-            }
-        }
-        if !supported_input_found {
-            return Err(QuoteError::UnsupportedAsset(
-                "None of the provided input chains are supported as origin".to_string(),
-            ));
-        }
+		// Validate available inputs (origin chains): at least one supported
+		let mut supported_input_found = false;
+		for input in &request.available_inputs {
+			let chain_id = Self::chain_id_from_interop(&input.asset)?;
+			tracing::info!("Checking input chain ID: {}", chain_id);
+			if origin_supported.contains(&chain_id) {
+				supported_input_found = true;
+				break;
+			}
+		}
+		if !supported_input_found {
+			return Err(QuoteError::UnsupportedAsset(
+				"None of the provided input chains are supported as origin".to_string(),
+			));
+		}
 
 		// Validate requested outputs (destination chains)
 		for output in &request.requested_outputs {
@@ -88,28 +89,29 @@ impl QuoteValidator {
 	///
 	/// The user may provide many tokens; we only require support for at least one
 	/// token on at least one configured network.
+	#[allow(dead_code)]
 	pub fn validate_supported_tokens(
 		request: &GetQuoteRequest,
 		solver: &SolverEngine,
 	) -> Result<(), QuoteError> {
 		let networks = solver.token_manager().get_networks();
 
-        let mut found_supported = false;
+		let mut found_supported = false;
 
 		// Check available inputs
 		for input in &request.available_inputs {
 			let chain_id = Self::chain_id_from_interop(&input.asset)?;
-            if let Ok(addr) = input.asset.ethereum_address() {
-                if let Some(net) = networks.get(&chain_id) {
-                    if net
-                        .tokens
-                        .iter()
-                        .any(|t| t.address.0.as_slice() == addr.as_slice())
-                    {
-                        found_supported = true;
-                    }
-                }
-            }
+			if let Ok(addr) = input.asset.ethereum_address() {
+				if let Some(net) = networks.get(&chain_id) {
+					if net
+						.tokens
+						.iter()
+						.any(|t| t.address.0.as_slice() == addr.as_slice())
+					{
+						found_supported = true;
+					}
+				}
+			}
 			if found_supported {
 				return Ok(());
 			}
@@ -118,17 +120,17 @@ impl QuoteValidator {
 		// Check requested outputs
 		for output in &request.requested_outputs {
 			let chain_id = Self::chain_id_from_interop(&output.asset)?;
-            if let Ok(addr) = output.asset.ethereum_address() {
-                if let Some(net) = networks.get(&chain_id) {
-                    if net
-                        .tokens
-                        .iter()
-                        .any(|t| t.address.0.as_slice() == addr.as_slice())
-                    {
-                        found_supported = true;
-                    }
-                }
-            }
+			if let Ok(addr) = output.asset.ethereum_address() {
+				if let Some(net) = networks.get(&chain_id) {
+					if net
+						.tokens
+						.iter()
+						.any(|t| t.address.0.as_slice() == addr.as_slice())
+					{
+						found_supported = true;
+					}
+				}
+			}
 			if found_supported {
 				return Ok(());
 			}
@@ -216,94 +218,98 @@ impl QuoteValidator {
 		})
 	}
 
-    /// From the provided availableInputs, collect all assets that are supported by the solver.
-    ///
-    /// Returns Err if none are supported. Otherwise returns the subset to be used by later stages
-    /// (e.g., balance checks, custody selection).
-    pub fn collect_supported_available_inputs(
-        request: &GetQuoteRequest,
-        solver: &SolverEngine,
-    ) -> Result<Vec<SupportedAsset>, QuoteError> {
-        let networks = solver.token_manager().get_networks();
-        let mut out: Vec<SupportedAsset> = Vec::new();
+	/// From the provided availableInputs, collect all assets that are supported by the solver.
+	///
+	/// Returns Err if none are supported. Otherwise returns the subset to be used by later stages
+	/// (e.g., balance checks, custody selection).
+	pub fn collect_supported_available_inputs(
+		request: &GetQuoteRequest,
+		solver: &SolverEngine,
+	) -> Result<Vec<SupportedAsset>, QuoteError> {
+		let networks = solver.token_manager().get_networks();
+		let mut out: Vec<SupportedAsset> = Vec::new();
 
-        for input in &request.available_inputs {
-            let chain_id = Self::chain_id_from_interop(&input.asset)?;
-            let evm_addr = match input.asset.ethereum_address() {
-                Ok(a) => a,
-                Err(e) => {
-                    return Err(QuoteError::InvalidRequest(format!(
-                        "Invalid input asset address: {}",
-                        e
-                    )))
-                }
-            };
+		for input in &request.available_inputs {
+			let chain_id = Self::chain_id_from_interop(&input.asset)?;
+			let evm_addr = match input.asset.ethereum_address() {
+				Ok(a) => a,
+				Err(e) => {
+					return Err(QuoteError::InvalidRequest(format!(
+						"Invalid input asset address: {}",
+						e
+					)))
+				}
+			};
 
-            if let Some(net) = networks.get(&chain_id) {
-                if net
-                    .tokens
-                    .iter()
-                    .any(|t| t.address.0.as_slice() == evm_addr.as_slice())
-                {
-                    out.push(SupportedAsset {
-                        chain_id,
-                        evm_address: evm_addr,
-                        interop: input.asset.clone(),
-                        amount: input.amount,
-                    });
-                }
-            }
-        }
+			if let Some(net) = networks.get(&chain_id) {
+				if net
+					.tokens
+					.iter()
+					.any(|t| t.address.0.as_slice() == evm_addr.as_slice())
+				{
+					out.push(SupportedAsset {
+						chain_id,
+						evm_address: evm_addr,
+						interop: input.asset.clone(),
+						amount: input.amount,
+					});
+				}
+			}
+		}
 
-        if out.is_empty() {
-            return Err(QuoteError::UnsupportedAsset(
-                "None of the provided availableInputs are supported".to_string(),
-            ));
-        }
+		if out.is_empty() {
+			return Err(QuoteError::UnsupportedAsset(
+				"None of the provided availableInputs are supported".to_string(),
+			));
+		}
 
-        Ok(out)
-    }
+		Ok(out)
+	}
 
-    /// Validate that ALL requestedOutputs are supported, and return them in a structured form.
-    pub fn validate_and_collect_requested_outputs(
-        request: &GetQuoteRequest,
-        solver: &SolverEngine,
-    ) -> Result<Vec<SupportedAsset>, QuoteError> {
-        let networks = solver.token_manager().get_networks();
-        let mut out: Vec<SupportedAsset> = Vec::new();
+	/// Validate that ALL requestedOutputs are supported, and return them in a structured form.
+	pub fn validate_and_collect_requested_outputs(
+		request: &GetQuoteRequest,
+		solver: &SolverEngine,
+	) -> Result<Vec<SupportedAsset>, QuoteError> {
+		let networks = solver.token_manager().get_networks();
+		let mut out: Vec<SupportedAsset> = Vec::new();
 
-        for output in &request.requested_outputs {
-            let chain_id = Self::chain_id_from_interop(&output.asset)?;
-            let evm_addr = match output.asset.ethereum_address() {
-                Ok(a) => a,
-                Err(e) => {
-                    return Err(QuoteError::InvalidRequest(format!(
-                        "Invalid output asset address: {}",
-                        e
-                    )))
-                }
-            };
+		for output in &request.requested_outputs {
+			let chain_id = Self::chain_id_from_interop(&output.asset)?;
+			let evm_addr = match output.asset.ethereum_address() {
+				Ok(a) => a,
+				Err(e) => {
+					return Err(QuoteError::InvalidRequest(format!(
+						"Invalid output asset address: {}",
+						e
+					)))
+				}
+			};
 
-            let supported = networks
-                .get(&chain_id)
-                .map(|net| net.tokens.iter().any(|t| t.address.0.as_slice() == evm_addr.as_slice()))
-                .unwrap_or(false);
+			let supported = networks
+				.get(&chain_id)
+				.map(|net| {
+					net.tokens
+						.iter()
+						.any(|t| t.address.0.as_slice() == evm_addr.as_slice())
+				})
+				.unwrap_or(false);
 
-            if !supported {
-                return Err(QuoteError::UnsupportedAsset(format!(
-                    "Requested output token not supported on chain {}",
-                    chain_id
-                )));
-            }
+			if !supported {
+				return Err(QuoteError::UnsupportedAsset(format!(
+					"Requested output token not supported on chain {}",
+					chain_id
+				)));
+			}
 
-            out.push(SupportedAsset {
-                chain_id,
-                evm_address: evm_addr,
-                interop: output.asset.clone(),
-                amount: output.amount,
-            });
-        }
+			out.push(SupportedAsset {
+				chain_id,
+				evm_address: evm_addr,
+				interop: output.asset.clone(),
+				amount: output.amount,
+			});
+		}
 
-        Ok(out)
-    }
+		Ok(out)
+	}
 }
