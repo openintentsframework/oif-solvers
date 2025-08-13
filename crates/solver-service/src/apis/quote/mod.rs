@@ -3,22 +3,18 @@
 //! This module contains the core business logic for quote processing,
 //! separated from the HTTP API layer for better maintainability and testing.
 
-pub mod capability;
 pub mod custody;
 pub mod generation;
 pub mod validation;
 
 // Re-export main functionality
 pub use generation::QuoteGenerator;
-pub use validation::QuoteValidator;
-
-// Main API function
-use self::capability::ensure_destination_balances;
 use solver_config::Config;
 use solver_core::SolverEngine;
 use solver_types::{GetQuoteRequest, GetQuoteResponse, Quote, QuoteError, StorageKey};
 use std::time::Duration;
 use tracing::info;
+pub use validation::QuoteValidator;
 
 /// Processes a quote request and returns available quote options.
 ///
@@ -47,7 +43,7 @@ pub async fn process_quote_request(
 	);
 
 	// Check destination balances for required outputs
-	ensure_destination_balances(solver, &supported_outputs).await?;
+	QuoteValidator::ensure_destination_balances(solver, &supported_outputs).await?;
 
 	// 4. Generate quotes using the business logic layer
 	let quote_generator = QuoteGenerator::new();
