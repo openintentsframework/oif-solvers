@@ -73,13 +73,14 @@ USER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user = ' | cut -d'
 USER_PRIVATE_KEY=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user_private_key = ' | cut -d'"' -f2)
 RECIPIENT_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'recipient = ' | cut -d'"' -f2)
 
-# Configuration - RPC URLs from networks section
+# Configuration - Parse chain IDs and RPC URLs from networks section
+# Chain IDs are the network keys themselves
+ORIGIN_CHAIN_ID=31337
+DEST_CHAIN_ID=31338
 ORIGIN_RPC_URL=$(grep -A 2 '\[networks.31337\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
 DEST_RPC_URL=$(grep -A 2 '\[networks.31338\]' config/demo.toml | grep 'rpc_url = ' | cut -d'"' -f2)
 RPC_URL=$ORIGIN_RPC_URL  # Default for compatibility
 AMOUNT="1000000000000000000"  # 1 token
-ORIGIN_CHAIN_ID=31337
-DEST_CHAIN_ID=31338
 
 # Parse command line arguments for token addresses
 if [ -n "$1" ] && [[ "$1" =~ ^0x[a-fA-F0-9]{40}$ ]]; then
@@ -116,8 +117,8 @@ echo -e "   User (depositor): $USER_ADDR"
 echo -e "   Solver:           $SOLVER_ADDR"
 echo -e "   Recipient:        $RECIPIENT_ADDR"
 echo -e "   Amount:           1.0 tokens"
-echo -e "   Origin Token:     $ORIGIN_TOKEN_ADDRESS ($ORIGIN_SYMBOL - Chain 31337)"
-echo -e "   Dest Token:       $DEST_TOKEN_ADDRESS ($DEST_SYMBOL - Chain 31338)"
+echo -e "   Origin Token:     $ORIGIN_TOKEN_ADDRESS ($ORIGIN_SYMBOL - Chain $ORIGIN_CHAIN_ID)"
+echo -e "   Dest Token:       $DEST_TOKEN_ADDRESS ($DEST_SYMBOL - Chain $DEST_CHAIN_ID)"
 echo -e "   InputSettler:     $INPUT_SETTLER_ADDRESS (Origin)"
 echo -e "   OutputSettler:    $OUTPUT_SETTLER_ADDRESS (Destination)"
 
@@ -146,38 +147,38 @@ check_balance() {
 show_balances() {
     if [ "$COMMAND" = "balances" ]; then
         # Show all token balances when checking balances
-        echo -e "${BLUE}💰 TokenA Balances on Origin Chain (31337):${NC}"
+        echo -e "${BLUE}💰 TokenA Balances on Origin Chain ($ORIGIN_CHAIN_ID):${NC}"
         check_balance $USER_ADDR "User" $ORIGIN_RPC_URL $DEFAULT_ORIGIN_TOKEN
         check_balance $SOLVER_ADDR "Solver" $ORIGIN_RPC_URL $DEFAULT_ORIGIN_TOKEN
         check_balance $RECIPIENT_ADDR "Recipient" $ORIGIN_RPC_URL $DEFAULT_ORIGIN_TOKEN
         check_balance $INPUT_SETTLER_ADDRESS "InputSettler" $ORIGIN_RPC_URL $DEFAULT_ORIGIN_TOKEN
         
-        echo -e "${BLUE}💰 TokenB Balances on Origin Chain (31337):${NC}"
+        echo -e "${BLUE}💰 TokenB Balances on Origin Chain ($ORIGIN_CHAIN_ID):${NC}"
         check_balance $USER_ADDR "User" $ORIGIN_RPC_URL $TOKENB_ORIGIN
         check_balance $SOLVER_ADDR "Solver" $ORIGIN_RPC_URL $TOKENB_ORIGIN
         check_balance $RECIPIENT_ADDR "Recipient" $ORIGIN_RPC_URL $TOKENB_ORIGIN
         check_balance $INPUT_SETTLER_ADDRESS "InputSettler" $ORIGIN_RPC_URL $TOKENB_ORIGIN
         
-        echo -e "${BLUE}💰 TokenA Balances on Destination Chain (31338):${NC}"
+        echo -e "${BLUE}💰 TokenA Balances on Destination Chain ($DEST_CHAIN_ID):${NC}"
         check_balance $USER_ADDR "User" $DEST_RPC_URL $DEFAULT_DEST_TOKEN
         check_balance $SOLVER_ADDR "Solver" $DEST_RPC_URL $DEFAULT_DEST_TOKEN
         check_balance $RECIPIENT_ADDR "Recipient" $DEST_RPC_URL $DEFAULT_DEST_TOKEN
         check_balance $OUTPUT_SETTLER_ADDRESS "OutputSettler" $DEST_RPC_URL $DEFAULT_DEST_TOKEN
         
-        echo -e "${BLUE}💰 TokenB Balances on Destination Chain (31338):${NC}"
+        echo -e "${BLUE}💰 TokenB Balances on Destination Chain ($DEST_CHAIN_ID):${NC}"
         check_balance $USER_ADDR "User" $DEST_RPC_URL $TOKENB_DEST
         check_balance $SOLVER_ADDR "Solver" $DEST_RPC_URL $TOKENB_DEST
         check_balance $RECIPIENT_ADDR "Recipient" $DEST_RPC_URL $TOKENB_DEST
         check_balance $OUTPUT_SETTLER_ADDRESS "OutputSettler" $DEST_RPC_URL $TOKENB_DEST
     else
         # Show only relevant token balances for intent
-        echo -e "${BLUE}💰 Current Balances on Origin Chain (31337) - $ORIGIN_SYMBOL:${NC}"
+        echo -e "${BLUE}💰 Current Balances on Origin Chain ($ORIGIN_CHAIN_ID) - $ORIGIN_SYMBOL:${NC}"
         check_balance $USER_ADDR "User" $ORIGIN_RPC_URL $ORIGIN_TOKEN_ADDRESS
         check_balance $SOLVER_ADDR "Solver" $ORIGIN_RPC_URL $ORIGIN_TOKEN_ADDRESS
         check_balance $RECIPIENT_ADDR "Recipient" $ORIGIN_RPC_URL $ORIGIN_TOKEN_ADDRESS
         check_balance $INPUT_SETTLER_ADDRESS "InputSettler" $ORIGIN_RPC_URL $ORIGIN_TOKEN_ADDRESS
         
-        echo -e "${BLUE}💰 Current Balances on Destination Chain (31338) - $DEST_SYMBOL:${NC}"
+        echo -e "${BLUE}💰 Current Balances on Destination Chain ($DEST_CHAIN_ID) - $DEST_SYMBOL:${NC}"
         check_balance $USER_ADDR "User" $DEST_RPC_URL $DEST_TOKEN_ADDRESS
         check_balance $SOLVER_ADDR "Solver" $DEST_RPC_URL $DEST_TOKEN_ADDRESS
         check_balance $RECIPIENT_ADDR "Recipient" $DEST_RPC_URL $DEST_TOKEN_ADDRESS
@@ -420,6 +421,10 @@ case "$COMMAND" in
                 echo -e "${YELLOW}💡 Install bc: brew install bc (macOS) or apt-get install bc (Linux)${NC}"
                 exit 1
             fi
+            
+            # Chain IDs are the network keys themselves
+            ORIGIN_CHAIN_ID=31337
+            DEST_CHAIN_ID=31338
             
             # Parse addresses from networks section
             INPUT_SETTLER_ADDRESS=$(grep -A 5 '\[networks.31337\]' config/demo.toml | grep 'input_settler_address = ' | cut -d'"' -f2)

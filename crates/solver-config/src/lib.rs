@@ -246,8 +246,20 @@ fn default_max_request_size() -> usize {
 ///
 /// Replaces ${VAR_NAME} with the value of the environment variable VAR_NAME.
 /// Supports default values with ${VAR_NAME:-default_value}.
+///
+/// Input strings are limited to 1MB to prevent ReDoS attacks.
 fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
-	let re = Regex::new(r"\$\{([^}:]+)(?::(-[^}]*))?\}")
+	// Limit input size to prevent ReDoS attacks
+	const MAX_INPUT_SIZE: usize = 1024 * 1024; // 1MB
+	if input.len() > MAX_INPUT_SIZE {
+		return Err(ConfigError::Validation(format!(
+			"Configuration file too large: {} bytes (max: {} bytes)",
+			input.len(),
+			MAX_INPUT_SIZE
+		)));
+	}
+
+	let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]{0,127})(?::-([^}]{0,256}))?\}")
 		.map_err(|e| ConfigError::Parse(format!("Regex error: {}", e)))?;
 
 	let mut result = input.to_string();
@@ -256,7 +268,7 @@ fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 	for cap in re.captures_iter(input) {
 		let full_match = cap.get(0).unwrap();
 		let var_name = cap.get(1).unwrap().as_str();
-		let default_value = cap.get(2).map(|m| &m.as_str()[1..]); // Skip the '-' in ':-'
+		let default_value = cap.get(2).map(|m| m.as_str());
 
 		let value = match std::env::var(var_name) {
 			Ok(v) => v,

@@ -410,11 +410,11 @@ pub fn create_http_delivery(
 	let signer: PrivateKeySigner =
 		if let Some(pk) = config.get("private_key").and_then(|v| v.as_str()) {
 			pk.parse()
-				.map_err(|e| DeliveryError::Network(format!("Invalid private key: {}", e)))?
+				.map_err(|_| DeliveryError::Network("Invalid private key format".to_string()))?
 		} else if let Some(default_pk) = default_private_key {
 			default_pk.with_exposed(|key| {
 				key.parse()
-					.map_err(|e| DeliveryError::Network(format!("Invalid private key: {}", e)))
+					.map_err(|_| DeliveryError::Network("Invalid private key format".to_string()))
 			})?
 		} else {
 			return Err(DeliveryError::Network(

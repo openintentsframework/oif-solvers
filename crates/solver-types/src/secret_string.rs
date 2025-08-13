@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 /// A secure string type that automatically zeros memory on drop and
 /// prevents accidental exposure in logs.
@@ -110,14 +110,6 @@ impl<'de> Deserialize<'de> for SecretString {
 	{
 		let s = String::deserialize(deserializer)?;
 		Ok(SecretString::new(s))
-	}
-}
-
-// Implement Drop to ensure zeroization (though Zeroizing already does this)
-impl Drop for SecretString {
-	fn drop(&mut self) {
-		// Zeroizing<String> already handles this, but we can be explicit
-		self.0.zeroize();
 	}
 }
 
