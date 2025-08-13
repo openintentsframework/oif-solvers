@@ -317,6 +317,23 @@ cat > config/demo.toml << EOF
 id = "oif-solver-testnet-usdc"
 monitoring_timeout_minutes = 5
 
+# Networks configuration
+[networks.$ORIGIN_CHAIN_ID]
+input_settler_address = "$INPUT_SETTLER"
+output_settler_address = "$OUTPUT_SETTLER"
+[[networks.$ORIGIN_CHAIN_ID.tokens]]
+address = "$ORIGIN_USDC_ADDRESS"
+symbol = "USDC"
+decimals = 6
+
+[networks.$DEST_CHAIN_ID]
+input_settler_address = "$INPUT_SETTLER"
+output_settler_address = "$OUTPUT_SETTLER"
+[[networks.$DEST_CHAIN_ID.tokens]]
+address = "$DEST_USDC_ADDRESS"
+symbol = "USDC"
+decimals = 6
+
 [storage]
 primary = "file"
 cleanup_interval_seconds = 3600
@@ -350,19 +367,17 @@ chain_id = $DEST_CHAIN_ID
 [discovery]
 [discovery.sources.onchain_eip7683]
 rpc_url = "$ORIGIN_RPC_URL"
-settler_addresses = ["$INPUT_SETTLER"]
+chain_id = $ORIGIN_CHAIN_ID
 
 [discovery.sources.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
 rpc_url = "$ORIGIN_RPC_URL"
-settler_address = "$INPUT_SETTLER"
+# auth_token = "your-secret-token"
 
 [order]
 [order.implementations.eip7683]
-output_settler_address = "$OUTPUT_SETTLER"
-input_settler_address = "$INPUT_SETTLER"
-solver_address = "$SOLVER_ADDRESS"
+# No config needed - uses networks config
 
 [order.execution_strategy]
 strategy_type = "simple"
@@ -371,37 +386,39 @@ max_gas_price_gwei = 100
 
 [settlement]
 [settlement.domain]
-chain_id = $ORIGIN_CHAIN_ID
+# Domain configuration for EIP-712 signatures in quotes
+chain_id = 1  # Ethereum mainnet
 address = "$INPUT_SETTLER"
 [settlement.implementations.eip7683]
 rpc_url = "$DEST_RPC_URL"
 oracle_address = "$ORACLE"
 dispute_period_seconds = 60
 
+# API server configuration
 [api]
 enabled = true
 host = "127.0.0.1"
 port = 3000
 timeout_seconds = 30
-max_request_size = 1048576
+max_request_size = 1048576  # 1MB
+
+# ============================================================================
+# DEMO SCRIPT CONFIGURATION
+# The following sections are used by demo scripts (send_onchain_intent.sh, etc.)
+# and are NOT required by the solver itself. The solver only needs the
+# configurations above.
+# ============================================================================
 
 # Contract addresses for testing (used by demo scripts)
 [contracts.origin]
-chain_id = $ORIGIN_CHAIN_ID
-rpc_url = "$ORIGIN_RPC_URL"
-token = "$ORIGIN_TOKEN"
-input_settler = "$INPUT_SETTLER"
-the_compact = "$ORIGIN_COMPACT_ADDRESS"
+USDC = "$ORIGIN_USDC_ADDRESS"
 permit2 = "$ORIGIN_PERMIT2_ADDRESS"
-oracle = "$ORACLE"
 
 [contracts.destination]
-chain_id = $DEST_CHAIN_ID
-rpc_url = "$DEST_RPC_URL"
-token = "$DEST_TOKEN"
-output_settler = "$OUTPUT_SETTLER"
+USDC = "$DEST_USDC_ADDRESS"
 permit2 = "$DEST_PERMIT2_ADDRESS"
 
+# Test accounts (used by demo scripts)
 [accounts]
 solver = "$SOLVER_ADDRESS"
 user = "$USER_ADDRESS"
