@@ -162,7 +162,33 @@ RUST_LOG=solver_core=debug,solver_delivery=debug,info cargo run -- --config conf
 
 ## Configuration
 
-The solver uses TOML configuration files. See `config/example.toml` for a complete example:
+The solver uses TOML configuration files with support for modular configuration through file includes. 
+
+### Modular Configuration (Recommended)
+
+Split your configuration into multiple files for better organization:
+
+```toml
+# config/main.toml - Main configuration file
+include = [
+    "networks.toml",  # Network and token configurations
+    "api.toml",       # API server settings
+    "storage.toml",   # Storage backend configuration
+    # ... other modules
+]
+
+[solver]
+id = "oif-solver-local"
+monitoring_timeout_minutes = 5
+```
+
+**Important**: Each top-level section must be unique across all files. Duplicate sections will cause an error.
+
+See `config/demo/` for a complete modular configuration example.
+
+### Single File Configuration
+
+You can also use a single configuration file. See `config/example.toml` for a complete example:
 
 ```toml
 # Solver identity and settings
