@@ -9,7 +9,7 @@ use solver_types::{
 	ExecutionDecision, ExecutionParams, Field, FieldType, Order, Schema,
 };
 
-use crate::ExecutionStrategy;
+use crate::{ExecutionStrategy, StrategyError};
 
 /// Simple execution strategy that considers gas price limits.
 ///
@@ -156,7 +156,13 @@ impl ExecutionStrategy for SimpleStrategy {
 ///
 /// Configuration parameters:
 /// - `max_gas_price_gwei`: Maximum gas price in gwei (default: 100)
-pub fn create_strategy(config: &toml::Value) -> Result<Box<dyn ExecutionStrategy>, String> {
+pub fn create_strategy(config: &toml::Value) -> Result<Box<dyn ExecutionStrategy>, StrategyError> {
+	// Validate configuration using the schema
+	let schema = SimpleStrategySchema;
+	schema
+		.validate(config)
+		.map_err(|e| StrategyError::InvalidConfig(e.to_string()))?;
+
 	let max_gas_price = config
 		.get("max_gas_price_gwei")
 		.and_then(|v| v.as_integer())

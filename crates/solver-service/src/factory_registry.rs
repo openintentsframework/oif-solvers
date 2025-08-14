@@ -8,7 +8,7 @@ use solver_config::Config;
 use solver_core::{SolverBuilder, SolverEngine, SolverFactories};
 use solver_delivery::{DeliveryError, DeliveryInterface};
 use solver_discovery::{DiscoveryError, DiscoveryInterface};
-use solver_order::{ExecutionStrategy, OrderError, OrderInterface};
+use solver_order::{ExecutionStrategy, OrderError, OrderInterface, StrategyError};
 use solver_settlement::{SettlementError, SettlementInterface};
 use solver_storage::{StorageError, StorageInterface};
 use solver_types::NetworksConfig;
@@ -30,7 +30,7 @@ pub type OrderFactory =
 	fn(&toml::Value, &NetworksConfig) -> Result<Box<dyn OrderInterface>, OrderError>;
 pub type SettlementFactory =
 	fn(&toml::Value, &NetworksConfig) -> Result<Box<dyn SettlementInterface>, SettlementError>;
-pub type StrategyFactory = fn(&toml::Value) -> Result<Box<dyn ExecutionStrategy>, String>;
+pub type StrategyFactory = fn(&toml::Value) -> Result<Box<dyn ExecutionStrategy>, StrategyError>;
 
 /// Global registry for all implementation factories
 pub struct FactoryRegistry {

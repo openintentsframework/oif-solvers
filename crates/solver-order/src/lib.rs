@@ -39,6 +39,23 @@ pub enum OrderError {
 	InvalidOrder(String),
 }
 
+/// Errors that can occur during strategy creation and execution.
+#[derive(Debug, Error)]
+pub enum StrategyError {
+	/// Error that occurs when strategy configuration is invalid.
+	#[error("Invalid configuration: {0}")]
+	InvalidConfig(String),
+	/// Error that occurs when a required parameter is missing.
+	#[error("Missing required parameter: {0}")]
+	MissingParameter(String),
+	/// Error that occurs during strategy initialization.
+	#[error("Initialization failed: {0}")]
+	InitializationFailed(String),
+	/// Error that occurs when strategy implementation is not available.
+	#[error("Implementation not available: {0}")]
+	ImplementationNotAvailable(String),
+}
+
 /// Trait defining the interface for order standard implementations.
 ///
 /// This trait must be implemented for each order standard (e.g., EIP-7683)
@@ -135,7 +152,7 @@ pub type OrderFactory =
 ///
 /// This is the function signature that all strategy implementations must provide
 /// to create instances of their execution strategy.
-pub type StrategyFactory = fn(&toml::Value) -> Result<Box<dyn ExecutionStrategy>, String>;
+pub type StrategyFactory = fn(&toml::Value) -> Result<Box<dyn ExecutionStrategy>, StrategyError>;
 
 /// Registry trait for order implementations.
 ///
