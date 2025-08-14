@@ -1,41 +1,13 @@
-# OIF Solver Configuration
+# OIF Solver Configuration - Main File
+
+include = [
+    "demo/networks.toml",
+    "demo/api.toml"
+]
 
 [solver]
 id = "oif-solver-demo"
 monitoring_timeout_minutes = 5
-
-# ============================================================================
-# NETWORKS - Central configuration for all chains
-# ============================================================================
-[networks.31337]
-rpc_url = "http://localhost:8545"
-input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-
-[[networks.31337.tokens]]
-address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-symbol = "TOKA"
-decimals = 18
-
-[[networks.31337.tokens]]
-address = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-symbol = "TOKB"
-decimals = 18
-
-[networks.31338]
-rpc_url = "http://localhost:8546"
-input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-
-[[networks.31338.tokens]]
-address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-symbol = "TOKA"
-decimals = 18
-
-[[networks.31338.tokens]]
-address = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-symbol = "TOKB"
-decimals = 18
 
 # ============================================================================
 # STORAGE
@@ -62,7 +34,6 @@ primary = "local"
 [account.implementations.local]
 private_key = "${ETH_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 
-
 # ============================================================================
 # DELIVERY
 # ============================================================================
@@ -71,9 +42,6 @@ min_confirmations = 1
 
 [delivery.implementations.evm_alloy]
 network_ids = [31337, 31338]
-# Optional: Map specific networks to different account names
-# If not specified, uses the primary account
-# accounts = { 31337 = "local", 31338 = "local" }
 
 # ============================================================================
 # DISCOVERY
@@ -87,7 +55,6 @@ network_ids = [31337, 31338]
 api_host = "127.0.0.1"
 api_port = 8081
 network_ids = [31337]
-# auth_token = "your-secret-token"
 
 # ============================================================================
 # ORDER
@@ -108,24 +75,13 @@ max_gas_price_gwei = 100
 [settlement]
 
 [settlement.domain]
-# Domain configuration for EIP-712 signatures in quotes
-chain_id = 1  # Ethereum mainnet for signature domain
+chain_id = 1
 address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 
 [settlement.implementations.eip7683]
 network_ids = [31337, 31338]
 oracle_addresses = { 31337 = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9", 31338 = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9" }
 dispute_period_seconds = 1
-
-# ============================================================================
-# API SERVER
-# ============================================================================
-[api]
-enabled = true
-host = "127.0.0.1"
-port = 3000
-timeout_seconds = 30
-max_request_size = 1048576  # 1MB
 
 
 # ============================================================================

@@ -162,7 +162,33 @@ RUST_LOG=solver_core=debug,solver_delivery=debug,info cargo run -- --config conf
 
 ## Configuration
 
-The solver uses TOML configuration files. See `config/example.toml` for a complete example:
+The solver uses TOML configuration files with support for modular configuration through file includes.
+
+### Modular Configuration (Recommended)
+
+Split your configuration into multiple files for better organization:
+
+```toml
+# config/main.toml - Main configuration file
+include = [
+    "networks.toml",  # Network and token configurations
+    "api.toml",       # API server settings
+    "storage.toml",   # Storage backend configuration
+    # ... other modules
+]
+
+[solver]
+id = "oif-solver-local"
+monitoring_timeout_minutes = 5
+```
+
+**Important**: Each top-level section must be unique across all files. Duplicate sections will cause an error.
+
+See `config/demo/` for a complete modular configuration example.
+
+### Single File Configuration
+
+You can also use a single configuration file. See `config/example.toml` for a complete example:
 
 ```toml
 # Solver identity and settings
@@ -297,6 +323,7 @@ The solver provides a REST API for interacting with the system and submitting of
 #### Orders
 
 - **POST `/api/orders`** - Submit a new EIP-7683 intent order
+
   - Request body: `{ order: "0x...", sponsor: "0x...", signature: "0x00..." }`
   - Returns: `{ status: "success", order_id: "...", message: null }`
 
@@ -306,6 +333,7 @@ The solver provides a REST API for interacting with the system and submitting of
 #### Tokens
 
 - **GET `/api/tokens`** - Get all supported tokens across all networks
+
   - Returns a map of chain IDs to network configurations with supported tokens
 
 - **GET `/api/tokens/{chain_id}`** - Get supported tokens for a specific chain
@@ -461,6 +489,9 @@ In another terminal, execute the send intent script to create and observe a cros
 
 # Combine token routing with direct API
 ./scripts/demo/send_offchain_intent.sh 0x5FbDB2315678afecb367f032d93F642f64180aa3 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 --direct
+
+# Check all token balances
+./scripts/demo/send_offchain_intent.sh balances
 ```
 
 The scripts will:

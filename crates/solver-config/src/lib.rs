@@ -3,11 +3,20 @@
 //! This module provides structures and utilities for managing solver configuration.
 //! It supports loading configuration from TOML files and provides validation to ensure
 //! all required configuration values are properly set.
+//!
+//! ## Modular Configuration Support
+//!
+//! Configurations can be split into multiple files for better organization:
+//! - Use `include = ["file1.toml", "file2.toml"]` to include other config files
+//! - Each top-level section must be unique across all files (no duplicates allowed)
+
+mod loader;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use solver_types::{networks::deserialize_networks, NetworksConfig};
 use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -248,7 +257,7 @@ fn default_max_request_size() -> usize {
 /// Supports default values with ${VAR_NAME:-default_value}.
 ///
 /// Input strings are limited to 1MB to prevent ReDoS attacks.
-fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
+pub(crate) fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 	// Limit input size to prevent ReDoS attacks
 	const MAX_INPUT_SIZE: usize = 1024 * 1024; // 1MB
 	if input.len() > MAX_INPUT_SIZE {
@@ -296,29 +305,21 @@ fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 }
 
 impl Config {
-	/// Loads configuration from a file at the specified path.
-	///
-	/// This method reads the file content, resolves environment variables,
-	/// and parses it as TOML configuration. The configuration is validated
-	/// before being returned.
-	///
-	/// Environment variables can be referenced using:
-	/// - `${VAR_NAME}` - Required environment variable
-	/// - `${VAR_NAME:-default}` - With default value if not set
-	pub fn from_file(path: &str) -> Result<Self, ConfigError> {
-		let content = std::fs::read_to_string(path)?;
-		let resolved = resolve_env_vars(&content)?;
-		resolved.parse()
-	}
-
 	/// Loads configuration from a file with async environment variable resolution.
 	///
-	/// This method is async-ready for future extensions that might need
-	/// async secret resolution (e.g., from Vault, AWS KMS, etc).
-	pub async fn from_file_async(path: &str) -> Result<Self, ConfigError> {
-		// For now, just calls the sync version
-		// In the future, this could use async resolvers
-		Self::from_file(path)
+	/// This method supports modular configuration through include directives:
+	/// - `include = ["file1.toml", "file2.toml"]` - Include specific files
+	///
+	/// Each top-level section must be unique across all configuration files.
+	pub async fn from_file(path: &str) -> Result<Self, ConfigError> {
+		let path_buf = Path::new(path);
+		let base_dir = path_buf.parent().unwrap_or_else(|| Path::new("."));
+
+		let mut loader = loader::ConfigLoader::new(base_dir);
+		let file_name = path_buf
+			.file_name()
+			.ok_or_else(|| ConfigError::Validation(format!("Invalid path: {}", path)))?;
+		loader.load_config(file_name).await
 	}
 
 	/// Validates the configuration to ensure all required fields are properly set.

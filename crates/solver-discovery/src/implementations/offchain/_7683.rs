@@ -733,18 +733,6 @@ async fn handle_intent_submission(
 	}
 }
 
-/// Configuration schema for EIP-7683 offchain discovery.
-///
-/// Defines and validates the configuration parameters required
-/// for the off-chain discovery service. This schema ensures
-/// all required fields are present and have valid values.
-///
-/// # Required Fields
-///
-/// - `api_port` - Port number (1-65535)
-/// - `api_host` - Host address string
-/// - `rpc_url` - HTTP(S) URL for Ethereum RPC
-///
 /// Configuration schema for EIP-7683 off-chain discovery service.
 ///
 /// This schema validates the configuration for the off-chain discovery API,
@@ -752,14 +740,13 @@ async fn handle_intent_submission(
 ///
 /// # Required Fields
 ///
+/// - `api_host` - Host address for the API server (e.g., "127.0.0.1" or "0.0.0.0")
 /// - `api_port` - Port number for the API server (1-65535)
-/// - `api_host` - Host address for the API server
-/// - `rpc_url` - Ethereum RPC URL for contract interactions
+/// - `network_ids` - List of network IDs this discovery service monitors
 ///
 /// # Optional Fields
 ///
-/// - `auth_token` - Authentication token string
-/// - `rate_limit` - Request rate limit (1-10000)
+/// - `auth_token` - Authentication token string for API access
 pub struct Eip7683OffchainDiscoverySchema;
 
 impl Eip7683OffchainDiscoverySchema {
@@ -775,6 +762,7 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 		let schema = Schema::new(
 			// Required fields
 			vec![
+				Field::new("api_host", FieldType::String),
 				Field::new(
 					"api_port",
 					FieldType::Integer {
@@ -782,11 +770,6 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 						max: Some(65535),
 					},
 				),
-				Field::new("api_host", FieldType::String),
-			],
-			// Optional fields
-			vec![
-				Field::new("auth_token", FieldType::String),
 				Field::new(
 					"network_ids",
 					FieldType::Array(Box::new(FieldType::Integer {
@@ -794,6 +777,10 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 						max: None,
 					})),
 				),
+			],
+			// Optional fields
+			vec![
+				Field::new("auth_token", FieldType::String),
 				Field::new(
 					"rate_limit",
 					FieldType::Integer {
