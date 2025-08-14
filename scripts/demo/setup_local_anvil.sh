@@ -448,10 +448,12 @@ monitoring_timeout_minutes = 5
 rpc_url = "http://localhost:$ORIGIN_PORT"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
+
 [[networks.$ORIGIN_CHAIN_ID.tokens]]
 address = "$TOKENA"
 symbol = "TOKA"
 decimals = 18
+
 [[networks.$ORIGIN_CHAIN_ID.tokens]]
 address = "$TOKENB"
 symbol = "TOKB"
@@ -461,10 +463,12 @@ decimals = 18
 rpc_url = "http://localhost:$DEST_PORT"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
+
 [[networks.$DEST_CHAIN_ID.tokens]]
 address = "$TOKENA"
 symbol = "TOKA"
 decimals = 18
+
 [[networks.$DEST_CHAIN_ID.tokens]]
 address = "$TOKENB"
 symbol = "TOKB"
@@ -490,66 +494,62 @@ ttl_order_by_tx_hash = 86400    # 24 hours
 # ACCOUNT
 # ============================================================================
 [account]
-provider = "local"
-[account.config]
+primary = "local"
+
+[account.implementations.local]
 private_key = "\${ETH_PRIVATE_KEY:-$PRIVATE_KEY}"
 
 # ============================================================================
-# DELIVERY - References networks by ID
+# DELIVERY
 # ============================================================================
 [delivery]
 min_confirmations = 1
 
-[delivery.providers.origin]
-network_id = $ORIGIN_CHAIN_ID  # References networks.$ORIGIN_CHAIN_ID for RPC URL and chain ID
-# private_key omitted - uses account.config.private_key by default
-
-[delivery.providers.destination]
-network_id = $DEST_CHAIN_ID  # References networks.$DEST_CHAIN_ID
-# private_key omitted - uses account.config.private_key by default
-
-# Example: Override for specific provider if needed
-# [delivery.providers.special]
-# network_id = 1
-# private_key = "0x..."  # Explicit override for this provider
+[delivery.implementations.evm_alloy]
+network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
+# Optional: Map specific networks to different account names
+# If not specified, uses the primary account
+# accounts = { $ORIGIN_CHAIN_ID = "local", $DEST_CHAIN_ID = "local" }
 
 # ============================================================================
-# DISCOVERY - References networks for chain-specific sources
+# DISCOVERY
 # ============================================================================
 [discovery]
 
-[discovery.sources.onchain_eip7683]
-network_id = $ORIGIN_CHAIN_ID  # Required: specifies which chain to monitor
+[discovery.implementations.onchain_eip7683]
+network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
 
-[discovery.sources.offchain_eip7683]
+[discovery.implementations.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
-network_ids = [$ORIGIN_CHAIN_ID]  # Optional: declares multi-chain support
+network_ids = [$ORIGIN_CHAIN_ID]
 # auth_token = "your-secret-token"
 
 # ============================================================================
 # ORDER
 # ============================================================================
 [order]
-[order.implementations.eip7683]
-# Uses networks config for all chain-specific settings
 
-[order.execution_strategy]
-strategy_type = "simple"
-[order.execution_strategy.config]
+[order.implementations.eip7683]
+
+[order.strategy]
+primary = "simple"
+
+[order.strategy.implementations.simple]
 max_gas_price_gwei = 100
 
 # ============================================================================
-# SETTLEMENT - References networks for chain config
+# SETTLEMENT
 # ============================================================================
 [settlement]
+
 [settlement.domain]
 # Domain configuration for EIP-712 signatures in quotes
 chain_id = 1  # Ethereum mainnet for signature domain
 address = "$INPUT_SETTLER"
 
 [settlement.implementations.eip7683]
-network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]  # Monitor multiple chains for oracle verification
+network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
 oracle_addresses = { $ORIGIN_CHAIN_ID = "$ORACLE", $DEST_CHAIN_ID = "$ORACLE" }
 dispute_period_seconds = 1
 

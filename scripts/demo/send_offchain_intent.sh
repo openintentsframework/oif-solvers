@@ -110,7 +110,7 @@ DEST_SYMBOL=$(get_token_symbol "$DEST_TOKEN_ADDRESS")
 
 # Set API endpoint based on mode
 if [ "$API_MODE" = "direct" ]; then
-    API_PORT=$(grep -A 10 '\[discovery.sources.offchain_eip7683\]' config/demo.toml | grep 'api_port = ' | awk '{print $3}')
+    API_PORT=$(grep -A 10 '\[discovery.implementations.offchain_eip7683\]' config/demo.toml | grep 'api_port = ' | awk '{print $3}')
     API_URL="http://localhost:${API_PORT:-8081}/intent"
     echo -e "${YELLOW}Using direct discovery API at $API_URL${NC}"
 elif [ "$API_MODE" = "custom" ]; then

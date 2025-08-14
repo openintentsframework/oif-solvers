@@ -57,8 +57,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use solver_types::{
-	standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema, Eip7683OrderData, Field,
-	FieldType, Intent, IntentMetadata, NetworksConfig, Schema,
+	current_timestamp, standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema,
+	Eip7683OrderData, Field, FieldType, ImplementationRegistry, Intent, IntentMetadata,
+	NetworksConfig, Schema,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -66,17 +67,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::CorsLayer;
-
-/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch.
-///
-/// This function safely retrieves the current UNIX timestamp in seconds,
-/// returning 0 if the system time is somehow before the UNIX epoch.
-fn current_timestamp() -> u64 {
-	std::time::SystemTime::now()
-		.duration_since(std::time::UNIX_EPOCH)
-		.map(|d| d.as_secs())
-		.unwrap_or(0)
-}
 
 // Import the Solidity types for the OIF contracts
 sol! {
@@ -952,3 +942,17 @@ pub fn create_discovery(
 
 	Ok(Box::new(discovery))
 }
+
+/// Registry for the offchain EIP-7683 discovery implementation.
+pub struct Registry;
+
+impl ImplementationRegistry for Registry {
+	const NAME: &'static str = "offchain_eip7683";
+	type Factory = crate::DiscoveryFactory;
+
+	fn factory() -> Self::Factory {
+		create_discovery
+	}
+}
+
+impl crate::DiscoveryRegistry for Registry {}

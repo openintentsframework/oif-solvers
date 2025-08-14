@@ -103,9 +103,9 @@ pub struct StorageConfig {
 /// Configuration for delivery mechanisms.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DeliveryConfig {
-	/// Map of delivery provider names to their configurations.
-	/// Each provider has its own configuration format stored as raw TOML values.
-	pub providers: HashMap<String, toml::Value>,
+	/// Map of delivery implementation names to their configurations.
+	/// Each implementation has its own configuration format stored as raw TOML values.
+	pub implementations: HashMap<String, toml::Value>,
 	/// Minimum number of confirmations required for transactions.
 	/// Defaults to 12 confirmations if not specified.
 	#[serde(default = "default_confirmations")]
@@ -123,18 +123,18 @@ fn default_confirmations() -> u64 {
 /// Configuration for account management.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AccountConfig {
-	/// The type of account provider to use (e.g., "local", "aws-kms", "hardware").
-	pub provider: String,
-	/// Provider-specific configuration parameters as raw TOML values.
-	pub config: toml::Value,
+	/// Which implementation to use as primary.
+	pub primary: String,
+	/// Map of account implementation names to their configurations.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for order discovery.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DiscoveryConfig {
-	/// Map of discovery source names to their configurations.
-	/// Each source has its own configuration format stored as raw TOML values.
-	pub sources: HashMap<String, toml::Value>,
+	/// Map of discovery implementation names to their configurations.
+	/// Each implementation has its own configuration format stored as raw TOML values.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for order processing.
@@ -144,16 +144,16 @@ pub struct OrderConfig {
 	/// Each implementation handles specific order types.
 	pub implementations: HashMap<String, toml::Value>,
 	/// Strategy configuration for order execution.
-	pub execution_strategy: StrategyConfig,
+	pub strategy: StrategyConfig,
 }
 
 /// Configuration for execution strategies.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StrategyConfig {
-	/// The type of strategy to use (e.g., "fifo", "priority", "custom").
-	pub strategy_type: String,
-	/// Strategy-specific configuration parameters as raw TOML values.
-	pub config: toml::Value,
+	/// Which strategy implementation to use as primary.
+	pub primary: String,
+	/// Map of strategy implementation names to their configurations.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for settlement operations.
@@ -403,9 +403,9 @@ impl Config {
 		}
 
 		// Validate delivery config
-		if self.delivery.providers.is_empty() {
+		if self.delivery.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"At least one delivery provider required".into(),
+				"At least one delivery implementation required".into(),
 			));
 		}
 
@@ -422,16 +422,16 @@ impl Config {
 		}
 
 		// Validate account config
-		if self.account.provider.is_empty() {
+		if self.account.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"Account provider cannot be empty".into(),
+				"Account implementation cannot be empty".into(),
 			));
 		}
 
 		// Validate discovery config
-		if self.discovery.sources.is_empty() {
+		if self.discovery.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"At least one discovery source required".into(),
+				"At least one discovery implementation required".into(),
 			));
 		}
 
@@ -441,9 +441,14 @@ impl Config {
 				"At least one order implementation required".into(),
 			));
 		}
-		if self.order.execution_strategy.strategy_type.is_empty() {
+		if self.order.strategy.primary.is_empty() {
 			return Err(ConfigError::Validation(
-				"Execution strategy type cannot be empty".into(),
+				"Order strategy primary cannot be empty".into(),
+			));
+		}
+		if self.order.strategy.implementations.is_empty() {
+			return Err(ConfigError::Validation(
+				"At least one strategy implementation required".into(),
 			));
 		}
 
@@ -542,21 +547,21 @@ cleanup_interval_seconds = 3600
 [storage.implementations.memory]
 
 [delivery]
-[delivery.providers.test]
+[delivery.implementations.test]
 
 [account]
-provider = "local"
-[account.config]
+primary = "local"
+[account.implementations.local]
 private_key = "${TEST_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 
 [discovery]
-[discovery.sources.test]
+[discovery.implementations.test]
 
 [order]
 [order.implementations.test]
-[order.execution_strategy]
-strategy_type = "simple"
-[order.execution_strategy.config]
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
 
 [settlement]
 [settlement.implementations.test]

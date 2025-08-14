@@ -204,41 +204,42 @@ ttl_order_by_tx_hash = 86400    # 24 hours
 
 # Account management
 [account]
-provider = "local"
-[account.config]
+primary = "local"  # Specifies which account to use as default
+
+[account.implementations.local]
 private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-# Delivery providers for different chains
+# Optional: Additional accounts for per-network signing
+# [account.implementations.local2]
+# private_key = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+
+# Delivery implementations for different chains
 [delivery]
 min_confirmations = 1
-[delivery.providers.origin]
-rpc_url = "http://localhost:8545"
-private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-chain_id = 31337
 
-[delivery.providers.destination]
-rpc_url = "http://localhost:8546"
-private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-chain_id = 31338
+[delivery.implementations.evm_alloy]
+network_ids = [31337, 31338]  # Supports multiple networks in one implementation
+# Optional: Map specific networks to different accounts
+# accounts = { 31337 = "local", 31338 = "local2" }
 
-# Discovery sources for finding intents
-[discovery.sources.onchain_eip7683]
-rpc_url = "http://localhost:8545"
-chain_id = 31337
+# Discovery implementations for finding intents
+[discovery.implementations.onchain_eip7683]
+network_id = 31337  # Required: specifies which chain to monitor
 
-[discovery.sources.offchain_eip7683]
+[discovery.implementations.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
-rpc_url = "http://localhost:8545"
+network_ids = [31337]  # Optional: declares multi-chain support
 
 # Order execution strategy
 [order]
 [order.implementations.eip7683]
 # Uses networks config for settler addresses
 
-[order.execution_strategy]
-strategy_type = "simple"
-[order.execution_strategy.config]
+[order.strategy]
+primary = "simple"
+
+[order.strategy.implementations.simple]
 max_gas_price_gwei = 100
 
 # Settlement configuration
@@ -248,8 +249,8 @@ chain_id = 1  # For EIP-712 signatures
 address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 
 [settlement.implementations.eip7683]
-rpc_url = "http://localhost:8546"
-oracle_address = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+network_ids = [31337, 31338]  # Monitor multiple chains for oracle verification
+oracle_addresses = { 31337 = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9", 31338 = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9" }
 dispute_period_seconds = 1
 
 # API server (optional)
@@ -265,8 +266,8 @@ max_request_size = 1048576  # 1MB
 
 - **networks**: Defines supported chains with their settler contracts and available tokens
 - **storage**: Configures persistence backend with TTL for different data types
-- **account**: Manages signing keys for the solver
-- **delivery**: RPC endpoints and keys for submitting transactions to each chain
+- **account**: Manages signing keys for the solver (supports multiple accounts)
+- **delivery**: Handles transaction submission to multiple chains (supports per-network account mapping)
 - **discovery**: Sources for discovering new intents (on-chain events, off-chain APIs)
 - **order**: Execution strategy and protocol-specific settings
 - **settlement**: Configuration for claiming rewards and handling disputes
