@@ -6,7 +6,7 @@
 # This script sets up a complete testnet testing environment for the OIF cross-chain solver.
 # It performs the following operations:
 #
-# 1. Generates a new solver keypair automatically (if not already exists)
+# 1. Uses SOLVER_ADDRESS and USER_ADDRESS defined below
 # 2. Deploys smart contracts on both testnets:
 #    - InputSettlerEscrow on Ethereum Sepolia (origin chain)
 #    - OutputSettler7683 on Base Sepolia (destination chain)
@@ -27,6 +27,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+# ============================================================================
+# ADDRESSES - PASTE YOUR ADDRESSES HERE
+# ============================================================================
+SOLVER_ADDRESS=""  # Your solver address here
+SOLVER_PRIVATE_KEY="" # Your solver private key here
+USER_ADDRESS=""    # Your user address here
+USER_PRIVATE_KEY="" # Your user private key here
+DEST_RECIPIENT_ADDR="" # address of the destination recipient where the tokens will be sent to
 
 # ============================================================================
 # CONFIGURATION - UPDATE THESE VALUES
@@ -71,32 +80,37 @@ load_env_file() {
     echo -e "${GREEN}✓${NC} Loaded DEPLOYMENT_PRIVATE_KEY from .env"
 }
 
-# Generate solver keypair (without saving to file)
-generate_solver_keypair() {
-    echo -e "${YELLOW}🔑 Generating new solver keypair...${NC}"
+# Validate addresses
+validate_addresses() {
+    local errors=()
     
-    # Generate new keypair using cast (temporary, not saved)
-    KEYPAIR_OUTPUT=$(cast wallet new 2>&1)
+    # Check if SOLVER_ADDRESS is set
+    if [ -z "$SOLVER_ADDRESS" ]; then
+        errors+=("SOLVER_ADDRESS not set - please paste your solver address at the top of this script")
+    elif [[ ! "$SOLVER_ADDRESS" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+        errors+=("SOLVER_ADDRESS has invalid format - should be 0x followed by 40 hex characters")
+    fi
     
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to generate keypair${NC}"
-        echo "Output: $KEYPAIR_OUTPUT"
+    # Check if USER_ADDRESS is set
+    if [ -z "$USER_ADDRESS" ]; then
+        errors+=("USER_ADDRESS not set - please paste your user address at the top of this script")
+    elif [[ ! "$USER_ADDRESS" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+        errors+=("USER_ADDRESS has invalid format - should be 0x followed by 40 hex characters")
+    fi
+    
+    if [ ${#errors[@]} -ne 0 ]; then
+        echo -e "${RED}Configuration errors found:${NC}"
+        for error in "${errors[@]}"; do
+            echo "  ❌ $error"
+        done
+        echo
+        echo -e "${YELLOW}Please update the addresses at the top of this script:${NC}"
+        echo "  SOLVER_ADDRESS=\"0x...\""
+        echo "  USER_ADDRESS=\"0x...\""
         exit 1
     fi
     
-    # Extract address and private key from output
-    SOLVER_ADDRESS=$(echo "$KEYPAIR_OUTPUT" | grep "Address:" | awk '{print $2}')
-    SOLVER_PRIVATE_KEY=$(echo "$KEYPAIR_OUTPUT" | grep "Private key:" | awk '{print $3}')
-    
-    if [ -z "$SOLVER_ADDRESS" ] || [ -z "$SOLVER_PRIVATE_KEY" ]; then
-        echo -e "${RED}Failed to parse generated keypair${NC}"
-        echo "Output: $KEYPAIR_OUTPUT"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}✓${NC} Generated new solver keypair"
-    echo "  Address:     $SOLVER_ADDRESS"
-    echo "  Private Key: ${SOLVER_PRIVATE_KEY:0:10}...${SOLVER_PRIVATE_KEY: -4}"
+    echo -e "${GREEN}✓${NC} Addresses validated"
 }
 
 # Validate configuration
@@ -124,23 +138,20 @@ validate_config() {
 echo -e "${BLUE}🔧 Testnet USDC Setup (Sepolia + Base Sepolia)${NC}"
 echo "================================================"
 
-# Load environment variables first
+# Validate addresses first
+validate_addresses
+
+# Load environment variables from .env file
 load_env_file
 
 # Validate configuration
 validate_config
 
-# Generate solver keypair
-generate_solver_keypair
-
 # Account configuration
 DEPLOYMENT_KEY="$DEPLOYMENT_PRIVATE_KEY"
 DEPLOYER_ADDRESS=$(cast wallet address --private-key $DEPLOYMENT_KEY)
 
-# Solver configuration (now loaded from generated/existing keypair)
-USER_ADDRESS="$SOLVER_ADDRESS"       # For testing, user = solver
-USER_PRIVATE_KEY="$SOLVER_PRIVATE_KEY"
-RECIPIENT_ADDR="$SOLVER_ADDRESS"     # For testing, recipient = solver
+
 
 # USDC Token addresses
 ORIGIN_TOKEN="$ORIGIN_USDC_ADDRESS"
@@ -157,7 +168,7 @@ echo -e "${GREEN}✅ Configuration validated${NC}"
 echo "  Origin Chain:      Ethereum Sepolia (Chain ID: $ORIGIN_CHAIN_ID)"
 echo "  Destination Chain: Base Sepolia (Chain ID: $DEST_CHAIN_ID)"
 echo "  Deployer Address:  $DEPLOYER_ADDRESS"
-echo "  Solver Address:    $SOLVER_ADDRESS (Generated)"
+echo "  Solver Address:    $SOLVER_ADDRESS"
 echo "  Asset:             USDC on both chains"
 echo "  Origin USDC:       $ORIGIN_USDC_ADDRESS"
 echo "  Destination USDC:  $DEST_USDC_ADDRESS"
@@ -360,7 +371,7 @@ ttl_order_by_tx_hash = 86400    # 24 hours
 [account]
 provider = "local"
 [account.config]
-private_key = "$SOLVER_PRIVATE_KEY"  # Auto-generated solver private key
+private_key = "$SOLVER_PRIVATE_KEY"
 
 # ============================================================================
 # DELIVERY - References networks by ID
@@ -446,8 +457,8 @@ permit2 = "$DEST_PERMIT2_ADDRESS"
 [accounts]
 solver = "$SOLVER_ADDRESS"
 user = "$USER_ADDRESS"
-user_private_key = "$USER_PRIVATE_KEY"
-recipient = "$RECIPIENT_ADDR"
+user_private_key = "$USER_PRIVATE_KEY" # Use deployer private key for user
+recipient = "$DEST_RECIPIENT_ADDR"
 EOF
 
 # Done!
@@ -479,7 +490,8 @@ echo "    USDC Token:    $DEST_USDC_ADDRESS"
 echo
 echo -e "${BLUE}👥 Addresses:${NC}"
 echo "  Deployer (MetaMask): $DEPLOYER_ADDRESS"
-echo "  Solver (Generated):  $SOLVER_ADDRESS"
+echo "  Solver (Defined):  $SOLVER_ADDRESS"
+echo "  User (Defined):   $USER_ADDRESS"
 echo
 echo -e "${BLUE}💰 Current Balances:${NC}"
 echo "  Deployer Sepolia ETH:      ${DEPLOYER_ORIGIN_BALANCE} ETH"
@@ -493,12 +505,6 @@ echo "  Solver Base Sepolia USDC:  ${SOLVER_DEST_USDC} USDC"
 echo
 echo -e "${BLUE}📋 Files Created:${NC}"
 echo "  Config:      config/demo.toml"
-echo
-
-echo -e "${BLUE}🔑 Generated Solver Keypair (SAVE THIS INFORMATION):${NC}"
-echo "  Address:     $SOLVER_ADDRESS"
-echo "  Private Key: $SOLVER_PRIVATE_KEY"
-echo -e "${YELLOW}  ⚠️  WARNING: Save this private key securely! It won't be saved to any file.${NC}"
 echo
 
 echo -e "${YELLOW}To start the solver:${NC}"
