@@ -139,33 +139,32 @@ impl QuoteGenerator {
 		request: &GetQuoteRequest,
 		config: &Config,
 	) -> Result<QuoteOrder, QuoteError> {
-		// Get Permit2 domain address for the chain
+		use crate::apis::quote::eip712;
+
+		// Origin chain (Permit2 domain)
 		let chain_id = request.available_inputs[0]
 			.asset
 			.ethereum_chain_id()
 			.map_err(|e| {
 				QuoteError::InvalidRequest(format!("Invalid chain ID in asset address: {}", e))
 			})?;
-		let permit2_address = self.get_permit2_address(chain_id)?;
-		let domain_address = InteropAddress::new_ethereum(chain_id, permit2_address);
 
-		// Build Permit2 SignatureTransfer message
+		// Domain is represented as InteropAddress for the API, but verifyingContract comes from config.
+		// We keep domain as the Permit2 address on the origin chain.
+		let domain_address = eip712::permit2_domain_address_from_config(config, chain_id)?;
+		tracing::info!("Domain address: {:?}", domain_address);
+		let (final_digest, message_obj) =
+			eip712::build_permit2_batch_witness_digest(request, config)?;
+
 		let message = serde_json::json!({
-			"permitted": {
-				"token": request.available_inputs[0].asset.ethereum_address().map_err(|e| {
-					QuoteError::InvalidRequest(format!("Invalid Ethereum address: {}", e))
-				})?,
-				"amount": request.available_inputs[0].amount.to_string()
-			},
-			"spender": self.get_escrow_address(config)?,
-			"nonce": chrono::Utc::now().timestamp(),
-			"deadline": chrono::Utc::now().timestamp() + 300
+			"digest": final_digest,
+			"eip712": message_obj,
 		});
 
 		Ok(QuoteOrder {
 			signature_type: SignatureType::Eip712,
 			domain: domain_address,
-			primary_type: "PermitTransferFrom".to_string(),
+			primary_type: "PermitBatchWitnessTransferFrom".to_string(),
 			message,
 		})
 	}
@@ -237,16 +236,6 @@ impl QuoteGenerator {
 				lock_kind
 			))),
 		}
-	}
-
-	/// Get Permit2 contract address for chain
-	fn get_permit2_address(&self, chain_id: u64) -> Result<alloy_primitives::Address, QuoteError> {
-		// Permit2 is deployed at the same address across all major chains
-		"0x000000000022D473030F116dDEE9F6B43aC78BA3"
-			.parse()
-			.map_err(|_| {
-				QuoteError::InvalidRequest(format!("Permit2 not available on chain {}", chain_id))
-			})
 	}
 
 	/// Get escrow contract address from config

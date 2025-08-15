@@ -162,7 +162,7 @@ impl CustodyStrategy {
 	}
 
 	/// Default Permit2 contract addresses per chain
-	fn default_permit2_addresses() -> HashMap<u64, Address> {
+	pub fn default_permit2_addresses() -> HashMap<u64, Address> {
 		let mut addresses = HashMap::new();
 
 		// Ethereum Mainnet
