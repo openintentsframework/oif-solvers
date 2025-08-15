@@ -240,6 +240,10 @@ rpc_url = "http://localhost:8545"
 strategy_type = "simple"
 [order.execution_strategy.config]
 max_gas_price_gwei = 100
+pricing_currency = "USDC"          # Display currency for quote cost breakdowns
+commission_bps = 20                 # 0.20% commission applied over subtotal
+gas_buffer_bps = 1000               # +10% buffer over estimated gas costs
+rate_buffer_bps = 14                # +0.14% buffer over base price for rate movement
 
 # Settlement configuration
 [settlement]
@@ -269,6 +273,11 @@ max_request_size = 1048576  # 1MB
 - **delivery**: RPC endpoints and keys for submitting transactions to each chain
 - **discovery**: Sources for discovering new intents (on-chain events, off-chain APIs)
 - **order**: Execution strategy and protocol-specific settings
+  - `order.execution_strategy.config` now accepts optional pricing fields:
+    - `pricing_currency` (default: "USDC")
+    - `commission_bps` (default: 20)
+    - `gas_buffer_bps` (default: 1000)
+    - `rate_buffer_bps` (default: 14)
 - **settlement**: Configuration for claiming rewards and handling disputes
 - **api**: Optional REST API server for receiving off-chain intents
 

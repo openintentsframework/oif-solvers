@@ -28,6 +28,8 @@ pub struct AlloyDelivery {
 	provider: Arc<dyn Provider<Http<reqwest::Client>> + Send + Sync>,
 	/// The chain ID this delivery service is configured for.
 	_chain_id: u64,
+	/// Default sender/address used for calls and gas estimation.
+	sender: Address,
 }
 
 impl AlloyDelivery {
@@ -48,6 +50,9 @@ impl AlloyDelivery {
 		// Set the chain ID on the signer
 		signer = signer.with_chain_id(Some(chain_id));
 
+		// Capture sender address before moving signer into wallet
+		let sender = signer.address();
+
 		let wallet = EthereumWallet::from(signer);
 
 		let provider = ProviderBuilder::new()
@@ -62,6 +67,7 @@ impl AlloyDelivery {
 		Ok(Self {
 			provider: Arc::new(provider),
 			_chain_id: chain_id,
+			sender,
 		})
 	}
 }
@@ -376,6 +382,18 @@ impl DeliveryInterface for AlloyDelivery {
 			.get_block_number()
 			.await
 			.map_err(|e| DeliveryError::Network(format!("Failed to get block number: {}", e)))
+	}
+
+	async fn estimate_gas(&self, tx: SolverTransaction) -> Result<u64, DeliveryError> {
+		let mut request: TransactionRequest = tx.into();
+		// Many nodes (incl. anvil) require a `from` for estimateGas to simulate context
+		request.from = Some(self.sender);
+		let gas = self
+			.provider
+			.estimate_gas(&request)
+			.await
+			.map_err(|e| DeliveryError::Network(format!("Failed to estimate gas: {}", e)))?;
+		Ok(gas)
 	}
 }
 
