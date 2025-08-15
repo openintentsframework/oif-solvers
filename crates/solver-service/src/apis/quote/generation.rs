@@ -139,7 +139,7 @@ impl QuoteGenerator {
 		request: &GetQuoteRequest,
 		config: &Config,
 	) -> Result<QuoteOrder, QuoteError> {
-		use solver_core::eip712::{build_permit2_batch_witness_digest, permit2_domain_address};
+		use crate::apis::quote::eip712;
 
 		// Origin chain (Permit2 domain)
 		let chain_id = request.available_inputs[0]
@@ -149,9 +149,12 @@ impl QuoteGenerator {
 				QuoteError::InvalidRequest(format!("Invalid chain ID in asset address: {}", e))
 			})?;
 
-		let domain_address = permit2_domain_address(chain_id)?;
-
-		let (final_digest, message_obj) = build_permit2_batch_witness_digest(request, config)?;
+		// Domain is represented as InteropAddress for the API, but verifyingContract comes from config.
+		// We keep domain as the Permit2 address on the origin chain.
+		let domain_address = eip712::permit2_domain_address_from_config(config, chain_id)?;
+		tracing::info!("Domain address: {:?}", domain_address);
+		let (final_digest, message_obj) =
+			eip712::build_permit2_batch_witness_digest(request, config)?;
 
 		let message = serde_json::json!({
 			"digest": final_digest,
