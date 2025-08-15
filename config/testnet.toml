@@ -1,0 +1,108 @@
+# OIF Solver Configuration - Testnet USDC Setup
+
+include = [
+    "testnet/networks.toml",
+    "testnet/api.toml"
+]
+
+[solver]
+id = "oif-solver-testnet-usdc"
+monitoring_timeout_minutes = 5
+
+# ============================================================================
+# STORAGE
+# ============================================================================
+[storage]
+primary = "file"
+cleanup_interval_seconds = 3600
+
+[storage.implementations.memory]
+# Memory storage has no configuration
+
+[storage.implementations.file]
+storage_path = "./data/storage"
+ttl_orders = 0                  # Permanent
+ttl_intents = 86400             # 24 hours
+ttl_order_by_tx_hash = 86400    # 24 hours
+
+# ============================================================================
+# ACCOUNT
+# ============================================================================
+[account]
+primary = "local"
+
+[account.implementations.local]
+private_key = "solver_private_key"
+
+# ============================================================================
+# DELIVERY
+# ============================================================================
+[delivery]
+min_confirmations = 3  # Higher confirmations for testnets
+
+[delivery.implementations.evm_alloy]
+network_ids = [84532, 421614]
+
+# ============================================================================
+# DISCOVERY
+# ============================================================================
+[discovery]
+
+[discovery.implementations.onchain_eip7683]
+network_ids = [84532, 421614]
+
+[discovery.implementations.offchain_eip7683]
+api_host = "127.0.0.1"
+api_port = 8081
+network_ids = [84532]
+
+# ============================================================================
+# ORDER
+# ============================================================================
+[order]
+
+[order.implementations.eip7683]
+
+[order.strategy]
+primary = "simple"
+
+[order.strategy.implementations.simple]
+max_gas_price_gwei = 100
+
+# ============================================================================
+# SETTLEMENT
+# ============================================================================
+[settlement]
+
+[settlement.domain]
+chain_id = 1
+address = "0xB686e4A97821E259d1BB15c5bf13ec96553176d7"
+
+[settlement.implementations.eip7683]
+network_ids = [84532, 421614]
+oracle_addresses = { 84532 = "0x5D2b783220a8391Df65bed8D1544dAF3c29A6d42", 421614 = "0x5D2b783220a8391Df65bed8D1544dAF3c29A6d42" }
+dispute_period_seconds = 60
+
+
+# ============================================================================
+# DEMO SCRIPT CONFIGURATION
+# The following sections are used by demo scripts (send_onchain_intent.sh, etc.)
+# and are NOT required by the solver itself. The solver only needs the
+# configurations above.
+# ============================================================================
+
+# Contract addresses for testing (used by demo scripts)
+[contracts.origin]
+USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+
+[contracts.destination]
+USDC = "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+
+# Test accounts (used by demo scripts)
+[accounts]
+solver = "solver_address"
+user = "user_address"
+user_private_key = "user_private_key"
+recipient = "recipient_address"

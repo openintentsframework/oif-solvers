@@ -1,0 +1,22 @@
+# Network Configuration - Testnet Setup
+# Defines all supported blockchain networks and their tokens
+
+[networks.84532]
+rpc_url = "https://sepolia.base.org"
+input_settler_address = "0x2d64BB8efC19d795AAeD9a0675Bfc29fE5F5dA77"
+output_settler_address = "0x12dd6Ee01c7a04F48d88e70822Cf1AE474467E2D"
+
+[[networks.84532.tokens]]
+address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+symbol = "USDC"
+decimals = 6
+
+[networks.421614]
+rpc_url = "https://arbitrum-sepolia-rpc.publicnode.com"
+input_settler_address = "0x2d64BB8efC19d795AAeD9a0675Bfc29fE5F5dA77"
+output_settler_address = "0x12dd6Ee01c7a04F48d88e70822Cf1AE474467E2D"
+
+[[networks.421614.tokens]]
+address = "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+symbol = "USDC"
+decimals = 6
