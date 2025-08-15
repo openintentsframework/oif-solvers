@@ -317,6 +317,23 @@ impl SolverEngine {
 		&self.token_manager
 	}
 
+	/// Exposes chain data (e.g., gas price, block number) for a specific chain.
+	pub async fn chain_data(
+		&self,
+		chain_id: u64,
+	) -> Result<solver_types::ChainData, solver_delivery::DeliveryError> {
+		self.delivery.get_chain_data(chain_id).await
+	}
+
+	/// Estimates gas units for a transaction on a specific chain.
+	pub async fn estimate_gas(
+		&self,
+		chain_id: u64,
+		tx: solver_types::Transaction,
+	) -> Result<u64, solver_delivery::DeliveryError> {
+		self.delivery.estimate_gas(chain_id, tx).await
+	}
+
 	/// Helper method to spawn handler tasks with semaphore-based concurrency control.
 	///
 	/// This method:

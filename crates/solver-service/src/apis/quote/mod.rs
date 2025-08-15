@@ -7,6 +7,7 @@ pub mod custody;
 pub mod eip712;
 pub mod generation;
 pub mod validation;
+pub mod cost;
 
 // Re-export main functionality
 pub use generation::QuoteGenerator;
@@ -48,9 +49,17 @@ pub async fn process_quote_request(
 
 	// 4. Generate quotes using the business logic layer
 	let quote_generator = QuoteGenerator::new();
-	let quotes = quote_generator.generate_quotes(&request, config).await?;
+	let mut quotes = quote_generator.generate_quotes(&request, config).await?;
 
-	// 5. Persist quotes
+	// 5. Enrich quotes with a preliminary cost breakdown
+	let cost_engine = cost::CostEngine::new();
+	for quote in &mut quotes {
+		if let Ok(cost) = cost_engine.estimate_cost(quote, solver, config).await {
+			quote.cost = Some(cost);
+		}
+	}
+
+	// 6. Persist quotes
 	let quote_ttl = Duration::from_secs(300);
 	store_quotes(solver, &quotes, quote_ttl).await;
 

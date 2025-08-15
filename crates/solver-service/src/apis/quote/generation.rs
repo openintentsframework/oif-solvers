@@ -77,6 +77,9 @@ impl QuoteGenerator {
 			}
 		};
 
+		// TODO: In future, we can pre-compute gas-sensitive metadata here based on `settlement_decision`
+		// and attach to the `QuoteOrder.message` (e.g., pre-estimated gas units or calldata previews).
+
 		// Create quote details
 		let details = QuoteDetails {
 			requested_outputs: request.requested_outputs.clone(),
@@ -93,6 +96,7 @@ impl QuoteGenerator {
 			eta: Some(eta),
 			quote_id,
 			provider: "oif-solver".to_string(),
+			cost: None,
 		})
 	}
 
@@ -152,7 +156,6 @@ impl QuoteGenerator {
 		// Domain is represented as InteropAddress for the API, but verifyingContract comes from config.
 		// We keep domain as the Permit2 address on the origin chain.
 		let domain_address = eip712::permit2_domain_address_from_config(config, chain_id)?;
-		tracing::info!("Domain address: {:?}", domain_address);
 		let (final_digest, message_obj) =
 			eip712::build_permit2_batch_witness_digest(request, config)?;
 

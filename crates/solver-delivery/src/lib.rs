@@ -112,6 +112,10 @@ pub trait DeliveryInterface: Send + Sync {
 	///
 	/// Returns the latest block number on the network.
 	async fn get_block_number(&self) -> Result<u64, DeliveryError>;
+
+	/// Estimates gas units for a transaction without submitting it.
+	/// Implementations should call the chain's estimateGas RPC with the provided transaction.
+	async fn estimate_gas(&self, tx: Transaction) -> Result<u64, DeliveryError>;
 }
 
 /// Service that manages transaction delivery across multiple blockchain networks.
@@ -332,5 +336,15 @@ impl DeliveryService {
 			}
 		}
 		Err(DeliveryError::NoProviderAvailable)
+	}
+
+	/// Estimates gas for a transaction on the specified chain.
+	pub async fn estimate_gas(&self, chain_id: u64, tx: Transaction) -> Result<u64, DeliveryError> {
+		let provider = self
+			.providers
+			.get(&chain_id)
+			.ok_or(DeliveryError::NoProviderAvailable)?;
+
+		provider.estimate_gas(tx).await
 	}
 }
