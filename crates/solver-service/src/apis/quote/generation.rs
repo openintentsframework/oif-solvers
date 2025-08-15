@@ -139,33 +139,29 @@ impl QuoteGenerator {
 		request: &GetQuoteRequest,
 		config: &Config,
 	) -> Result<QuoteOrder, QuoteError> {
-		// Get Permit2 domain address for the chain
+		use super::eip712::{build_permit2_batch_witness_digest, permit2_domain_address};
+
+		// Origin chain (Permit2 domain)
 		let chain_id = request.available_inputs[0]
 			.asset
 			.ethereum_chain_id()
 			.map_err(|e| {
 				QuoteError::InvalidRequest(format!("Invalid chain ID in asset address: {}", e))
 			})?;
-		let permit2_address = self.get_permit2_address(chain_id)?;
-		let domain_address = InteropAddress::new_ethereum(chain_id, permit2_address);
 
-		// Build Permit2 SignatureTransfer message
+		let domain_address = permit2_domain_address(chain_id)?;
+
+		let (final_digest, message_obj) = build_permit2_batch_witness_digest(request, config)?;
+
 		let message = serde_json::json!({
-			"permitted": {
-				"token": request.available_inputs[0].asset.ethereum_address().map_err(|e| {
-					QuoteError::InvalidRequest(format!("Invalid Ethereum address: {}", e))
-				})?,
-				"amount": request.available_inputs[0].amount.to_string()
-			},
-			"spender": self.get_escrow_address(config)?,
-			"nonce": chrono::Utc::now().timestamp(),
-			"deadline": chrono::Utc::now().timestamp() + 300
+			"digest": final_digest,
+			"eip712": message_obj,
 		});
 
 		Ok(QuoteOrder {
 			signature_type: SignatureType::Eip712,
 			domain: domain_address,
-			primary_type: "PermitTransferFrom".to_string(),
+			primary_type: "PermitBatchWitnessTransferFrom".to_string(),
 			message,
 		})
 	}
