@@ -139,7 +139,7 @@ impl QuoteGenerator {
 		request: &GetQuoteRequest,
 		config: &Config,
 	) -> Result<QuoteOrder, QuoteError> {
-		use super::eip712::{build_permit2_batch_witness_digest, permit2_domain_address};
+		use solver_core::eip712::{build_permit2_batch_witness_digest, permit2_domain_address};
 
 		// Origin chain (Permit2 domain)
 		let chain_id = request.available_inputs[0]
@@ -233,16 +233,6 @@ impl QuoteGenerator {
 				lock_kind
 			))),
 		}
-	}
-
-	/// Get Permit2 contract address for chain
-	fn get_permit2_address(&self, chain_id: u64) -> Result<alloy_primitives::Address, QuoteError> {
-		// Permit2 is deployed at the same address across all major chains
-		"0x000000000022D473030F116dDEE9F6B43aC78BA3"
-			.parse()
-			.map_err(|_| {
-				QuoteError::InvalidRequest(format!("Permit2 not available on chain {}", chain_id))
-			})
 	}
 
 	/// Get escrow contract address from config
