@@ -4,7 +4,6 @@
 //! order retrieval functionality for cross-chain intents. Users can query the
 //! status and details of their submitted orders using the order ID.
 
-use alloy_primitives::{hex, U256};
 use axum::extract::Path;
 use solver_core::SolverEngine;
 use solver_storage;
@@ -248,7 +247,7 @@ async fn convert_eip7683_order_to_response(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use alloy_primitives::hex;
+	use alloy_primitives::{hex, U256};
 	use mockall::{mock, predicate::eq};
 	use serde_json::json;
 	use solver_account::{implementations::local::LocalWallet, AccountService};
