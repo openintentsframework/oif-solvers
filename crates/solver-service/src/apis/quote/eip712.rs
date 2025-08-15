@@ -1,10 +1,8 @@
-//! EIP-712 helpers for building signing digests used in quotes.
+//! EIP-712 helpers for building signing digests.
 //!
-//! This module provides a minimal, well-scoped implementation to compute the
-//! EIP-712 final digest for the Permit2 batch witness flow used by the
-//! offchain intent demo. It avoids external ABI dependencies by only encoding
-//! static types (bytes32, address, uint256, uint32) as 32-byte words per the
-//! Solidity ABI rules for EIP-712 struct hashes.
+//! Provides a minimal, well-scoped implementation to compute EIP-712 final
+//! digests and a small ABI encoder for static types (bytes32, address, uint256,
+//! uint32) as 32-byte words per Solidity ABI rules for EIP-712 struct hashes.
 
 use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
 use serde_json::json;
@@ -48,7 +46,7 @@ pub fn build_permit2_batch_witness_digest(
 		.ethereum_address()
 		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid recipient address: {}", e)))?;
 
-	// Amounts: use the available input amount for both permit and output, aligning with demo.
+	// Amounts: use the available input amount for both permit and output.
 	let amount: U256 = input.amount;
 
 	// Spender = INPUT settler on origin chain
@@ -69,10 +67,8 @@ pub fn build_permit2_batch_witness_digest(
 	})?;
 	let output_settler = bytes20_to_address(&dest_net.output_settler_address.0)?;
 
-	// Permit2 contract is chain-agnostic address on origin chain
-	let permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-		.parse::<AlloyAddress>()
-		.map_err(|_| QuoteError::InvalidRequest("Invalid Permit2 address constant".to_string()))?;
+	// Permit2 verifying contract address for origin chain (from config, fallback to canonical)
+	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
 
 	// Oracle address (per origin chain) from settlement implementation config.
 	let input_oracle = resolve_oracle_address(config, origin_chain_id)?;
@@ -124,7 +120,7 @@ pub fn build_permit2_batch_witness_digest(
 	// ------------------------------
 	let mut enc = AbiEncoder::new();
 	enc.push_b256(&mandate_output_type_hash);
-	enc.push_b256(&B256::ZERO); // oracle bytes32 for output = zero per demo
+	enc.push_b256(&B256::ZERO); // oracle bytes32 for output = zero
 	enc.push_address32(&output_settler);
 	enc.push_u256(U256::from(dest_chain_id));
 	enc.push_address32(&dest_token);
@@ -248,6 +244,30 @@ fn resolve_oracle_address(config: &Config, chain_id: u64) -> Result<AlloyAddress
 	addr_str
 		.parse::<AlloyAddress>()
 		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid oracle address: {}", e)))
+}
+
+/// Resolve the Permit2 address for a given chain from config.
+///
+/// Looks under `settlement.implementations.eip7683.permit2_addresses` for a per-chain
+/// override. If not found, falls back to the canonical Permit2 address.
+fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, QuoteError> {
+	if let Some(impl_val) = config.settlement.implementations.get("eip7683") {
+		if let Some(table) = impl_val.as_table() {
+			if let Some(map) = table.get("permit2_addresses").and_then(|v| v.as_table()) {
+				let key = chain_id.to_string();
+				if let Some(addr_str) = map.get(&key).and_then(|v| v.as_str()) {
+					return addr_str.parse::<AlloyAddress>().map_err(|e| {
+						QuoteError::InvalidRequest(format!("Invalid Permit2 address: {}", e))
+					});
+				}
+			}
+		}
+	}
+
+	// Fallback to canonical Permit2 address present on most chains
+	"0x000000000022D473030F116dDEE9F6B43aC78BA3"
+		.parse::<AlloyAddress>()
+		.map_err(|_| QuoteError::InvalidRequest("Invalid Permit2 address constant".to_string()))
 }
 
 /// Minimal ABI encoder for static types used here.
