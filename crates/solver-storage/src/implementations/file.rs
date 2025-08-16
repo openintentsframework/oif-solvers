@@ -3,11 +3,13 @@
 //! This module provides concrete implementations of the StorageInterface trait,
 //! currently supporting file-based storage for persistence.
 
-use crate::{StorageError, StorageInterface};
+use crate::{QueryFilter, StorageError, StorageIndexes, StorageInterface};
 use async_trait::async_trait;
+use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use solver_types::{ConfigSchema, Field, FieldType, Schema, StorageKey, ValidationError};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 
@@ -115,6 +117,16 @@ impl FileHeader {
 	}
 }
 
+/// Index structure for a namespace.
+///
+/// Maintains mappings from field values to sets of keys for efficient querying.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NamespaceIndex {
+	/// Field -> Value -> Set of keys
+	/// Example: {"status": {"Pending": ["order1", "order2"], "Executed": ["order3"]}}
+	pub indexes: HashMap<String, HashMap<serde_json::Value, HashSet<String>>>,
+}
+
 /// TTL configuration for different storage keys.
 #[derive(Debug, Clone)]
 pub struct TtlConfig {
@@ -194,6 +206,168 @@ impl FileStorage {
 			.unwrap_or(Duration::ZERO)
 	}
 
+	/// Executes an operation with exclusive file locking on the index file.
+	async fn with_index_lock<F, Fut, R>(index_path: &Path, operation: F) -> Result<R, StorageError>
+	where
+		F: FnOnce() -> Fut,
+		Fut: std::future::Future<Output = Result<R, StorageError>>,
+	{
+		// Create lock file path
+		let lock_path = index_path.with_extension("lock");
+
+		// Ensure parent directory exists
+		if let Some(parent) = lock_path.parent() {
+			fs::create_dir_all(parent).await.map_err(|e| {
+				StorageError::Backend(format!("Failed to create lock directory: {}", e))
+			})?;
+		}
+
+		// Open or create lock file
+		let lock_file = std::fs::OpenOptions::new()
+			.create(true)
+			.truncate(true)
+			.write(true)
+			.open(&lock_path)
+			.map_err(|e| StorageError::Backend(format!("Failed to open lock file: {}", e)))?;
+
+		// Acquire exclusive lock (blocking)
+		lock_file
+			.lock_exclusive()
+			.map_err(|e| StorageError::Backend(format!("Failed to acquire lock: {}", e)))?;
+
+		// Perform operation
+		let result = operation().await;
+
+		// Unlock (happens automatically when lock_file is dropped)
+		drop(lock_file);
+
+		result
+	}
+
+	/// Updates index files when storing data.
+	async fn update_indexes(
+		&self,
+		namespace: &str,
+		key: &str,
+		indexes: &StorageIndexes,
+	) -> Result<(), StorageError> {
+		let index_path = self.base_path.join(format!("{}.index", namespace));
+		let index_path_clone = index_path.clone();
+
+		// Execute with file lock
+		Self::with_index_lock(&index_path, || async move {
+			// Load existing index or create new
+			let mut namespace_index = if index_path_clone.exists() {
+				let data = fs::read(&index_path_clone)
+					.await
+					.map_err(|e| StorageError::Backend(e.to_string()))?;
+				match serde_json::from_slice(&data) {
+					Ok(index) => index,
+					Err(e) => {
+						// Log error but don't fail - rebuild index from scratch
+						tracing::error!(
+							"Corrupted index file for {}: {}. Rebuilding.",
+							namespace,
+							e
+						);
+						NamespaceIndex::default()
+					}
+				}
+			} else {
+				NamespaceIndex::default()
+			};
+
+			// First, remove old index entries for this key if they exist
+			for (_, value_map) in namespace_index.indexes.iter_mut() {
+				for (_, keys) in value_map.iter_mut() {
+					keys.remove(key);
+				}
+			}
+
+			// Now add new index entries
+			for (field, value) in &indexes.fields {
+				namespace_index
+					.indexes
+					.entry(field.clone())
+					.or_default()
+					.entry(value.clone())
+					.or_default()
+					.insert(key.to_string());
+			}
+
+			// Clean up empty entries
+			namespace_index.indexes.retain(|_, value_map| {
+				value_map.retain(|_, keys| !keys.is_empty());
+				!value_map.is_empty()
+			});
+
+			// Write index atomically
+			let temp_path = index_path_clone.with_extension("tmp");
+			fs::write(
+				&temp_path,
+				serde_json::to_vec(&namespace_index)
+					.map_err(|e| StorageError::Serialization(e.to_string()))?,
+			)
+			.await
+			.map_err(|e| StorageError::Backend(e.to_string()))?;
+			fs::rename(temp_path, index_path_clone)
+				.await
+				.map_err(|e| StorageError::Backend(e.to_string()))?;
+
+			Ok(())
+		})
+		.await
+	}
+
+	/// Removes key from indexes when deleting.
+	async fn remove_from_indexes(&self, namespace: &str, key: &str) -> Result<(), StorageError> {
+		let index_path = self.base_path.join(format!("{}.index", namespace));
+
+		if !index_path.exists() {
+			return Ok(());
+		}
+
+		let index_path_clone = index_path.clone();
+
+		// Execute with file lock
+		Self::with_index_lock(&index_path, || async move {
+			let data = fs::read(&index_path_clone)
+				.await
+				.map_err(|e| StorageError::Backend(e.to_string()))?;
+			let mut namespace_index: NamespaceIndex = serde_json::from_slice(&data)
+				.map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+			// Remove key from all indexes
+			for (_, value_map) in namespace_index.indexes.iter_mut() {
+				for (_, keys) in value_map.iter_mut() {
+					keys.remove(key);
+				}
+			}
+
+			// Clean up empty entries
+			namespace_index.indexes.retain(|_, value_map| {
+				value_map.retain(|_, keys| !keys.is_empty());
+				!value_map.is_empty()
+			});
+
+			// Write updated index atomically
+			let temp_path = index_path_clone.with_extension("tmp");
+			fs::write(
+				&temp_path,
+				serde_json::to_vec(&namespace_index)
+					.map_err(|e| StorageError::Serialization(e.to_string()))?,
+			)
+			.await
+			.map_err(|e| StorageError::Backend(e.to_string()))?;
+			fs::rename(temp_path, index_path_clone)
+				.await
+				.map_err(|e| StorageError::Backend(e.to_string()))?;
+
+			Ok(())
+		})
+		.await
+	}
+
 	/// Removes all expired files from storage
 	async fn cleanup_expired_files(&self) -> Result<usize, StorageError> {
 		let mut removed = 0;
@@ -214,14 +388,21 @@ impl FileStorage {
 						if data.len() >= FileHeader::SIZE {
 							if let Ok(header) = FileHeader::deserialize(&data[..FileHeader::SIZE]) {
 								if header.is_expired() {
-									if let Err(e) = fs::remove_file(&path).await {
-										tracing::warn!(
-											"Failed to remove expired file {:?}: {}",
-											path,
-											e
-										);
-									} else {
-										removed += 1;
+									// Extract key from filename to properly delete with indexes
+									let file_name = entry.file_name();
+									let file_str = file_name.to_string_lossy();
+									if let Some(key_part) = file_str.strip_suffix(".bin") {
+										let key = key_part.replace('_', ":");
+										// Use delete method to ensure indexes are cleaned up
+										if let Err(e) = self.delete(&key).await {
+											tracing::warn!(
+												"Failed to remove expired file {:?}: {}",
+												path,
+												e
+											);
+										} else {
+											removed += 1;
+										}
 									}
 								}
 							}
@@ -283,6 +464,7 @@ impl StorageInterface for FileStorage {
 		&self,
 		key: &str,
 		value: Vec<u8>,
+		indexes: Option<StorageIndexes>,
 		ttl: Option<Duration>,
 	) -> Result<(), StorageError> {
 		let path = self.get_file_path(key);
@@ -316,6 +498,12 @@ impl StorageInterface for FileStorage {
 			.await
 			.map_err(|e| StorageError::Backend(e.to_string()))?;
 
+		// Update indexes if provided
+		if let Some(indexes) = indexes {
+			let namespace = key.split(':').next().unwrap_or("");
+			self.update_indexes(namespace, key, &indexes).await?;
+		}
+
 		Ok(())
 	}
 
@@ -323,7 +511,12 @@ impl StorageInterface for FileStorage {
 		let path = self.get_file_path(key);
 
 		match fs::remove_file(&path).await {
-			Ok(_) => Ok(()),
+			Ok(_) => {
+				// Also remove from indexes
+				let namespace = key.split(':').next().unwrap_or("");
+				self.remove_from_indexes(namespace, key).await?;
+				Ok(())
+			}
 			Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
 			Err(e) => Err(StorageError::Backend(e.to_string())),
 		}
@@ -340,6 +533,118 @@ impl StorageInterface for FileStorage {
 
 	async fn cleanup_expired(&self) -> Result<usize, StorageError> {
 		self.cleanup_expired_files().await
+	}
+
+	async fn query(
+		&self,
+		namespace: &str,
+		filter: QueryFilter,
+	) -> Result<Vec<String>, StorageError> {
+		let index_path = self.base_path.join(format!("{}.index", namespace));
+
+		// If no index exists, return empty results (nothing has been indexed yet)
+		if !index_path.exists() {
+			return Ok(Vec::new());
+		}
+
+		let index_path_clone = index_path.clone();
+
+		// Read index with shared lock (multiple readers allowed)
+		let namespace_index = Self::with_index_lock(&index_path, || async move {
+			let data = fs::read(&index_path_clone)
+				.await
+				.map_err(|e| StorageError::Backend(e.to_string()))?;
+			let index: NamespaceIndex = serde_json::from_slice(&data)
+				.map_err(|e| StorageError::Serialization(e.to_string()))?;
+			Ok(index)
+		})
+		.await?;
+
+		let matching_keys: Vec<String> = match filter {
+			QueryFilter::All => {
+				// Return all keys from all indexes
+				let mut all_keys = HashSet::new();
+				for value_map in namespace_index.indexes.values() {
+					for keys in value_map.values() {
+						all_keys.extend(keys.clone());
+					}
+				}
+				all_keys.into_iter().collect()
+			}
+			QueryFilter::Equals(field, value) => namespace_index
+				.indexes
+				.get(&field)
+				.and_then(|m| m.get(&value))
+				.map(|keys| keys.iter().cloned().collect())
+				.unwrap_or_default(),
+			QueryFilter::NotEquals(field, value) => {
+				let mut keys = HashSet::new();
+				if let Some(field_index) = namespace_index.indexes.get(&field) {
+					for (v, k) in field_index {
+						if v != &value {
+							keys.extend(k.clone());
+						}
+					}
+				}
+				keys.into_iter().collect()
+			}
+			QueryFilter::In(field, values) => {
+				let mut keys = HashSet::new();
+				if let Some(field_index) = namespace_index.indexes.get(&field) {
+					for value in &values {
+						if let Some(k) = field_index.get(value) {
+							keys.extend(k.clone());
+						}
+					}
+				}
+				keys.into_iter().collect()
+			}
+			QueryFilter::NotIn(field, values) => {
+				let mut keys = HashSet::new();
+				if let Some(field_index) = namespace_index.indexes.get(&field) {
+					for (value, k) in field_index {
+						if !values.contains(value) {
+							keys.extend(k.clone());
+						}
+					}
+				}
+				keys.into_iter().collect()
+			}
+		};
+
+		// Filter out expired entries
+		let mut valid_keys = Vec::new();
+		for key in matching_keys {
+			let path = self.get_file_path(&key);
+			if path.exists() {
+				// Check if not expired
+				if let Ok(data) = fs::read(&path).await {
+					if data.len() >= FileHeader::SIZE {
+						if let Ok(header) = FileHeader::deserialize(&data[..FileHeader::SIZE]) {
+							if !header.is_expired() {
+								valid_keys.push(key);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		Ok(valid_keys)
+	}
+
+	async fn get_batch(&self, keys: &[String]) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
+		let mut results = Vec::new();
+
+		for key in keys {
+			match self.get_bytes(key).await {
+				Ok(bytes) => results.push((key.clone(), bytes)),
+				Err(StorageError::NotFound) => continue,
+				Err(e) => return Err(e),
+			}
+		}
+
+		Ok(results)
 	}
 }
 
