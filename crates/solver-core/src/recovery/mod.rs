@@ -158,13 +158,16 @@ impl RecoveryService {
 	///
 	/// A vector of active orders that need recovery processing.
 	async fn load_active_orders(&self) -> Result<Vec<Order>, RecoveryError> {
-		// Define all terminal status values to exclude
-		// Need to match the JSON serialization format
+		// Define all terminal status values to exclude using proper serialization
 		let non_terminal_statuses = vec![
-			serde_json::json!("Finalized"),
-			serde_json::json!({"Failed": "Prepare"}),
-			serde_json::json!({"Failed": "Fill"}),
-			serde_json::json!({"Failed": "Claim"}),
+			serde_json::to_value(OrderStatus::Finalized)
+				.expect("OrderStatus::Finalized serialization should not fail"),
+			serde_json::to_value(OrderStatus::Failed(TransactionType::Prepare))
+				.expect("OrderStatus::Failed(Prepare) serialization should not fail"),
+			serde_json::to_value(OrderStatus::Failed(TransactionType::Fill))
+				.expect("OrderStatus::Failed(Fill) serialization should not fail"),
+			serde_json::to_value(OrderStatus::Failed(TransactionType::Claim))
+				.expect("OrderStatus::Failed(Claim) serialization should not fail"),
 		];
 
 		// Query for all non-terminal orders
@@ -423,23 +426,100 @@ impl RecoveryService {
 
 			ReconcileResult::Finalized => {
 				tracing::info!("Order {} already finalized", order.id);
-				// Update order status to finalized if not already
-				// Let the state machine handle the proper transition sequence
+				// Ensure proper state transitions to reach Finalized
 				if order.status != OrderStatus::Finalized {
-					if let Err(e) = self
-						.state_machine
-						.transition_order_status(&order.id, OrderStatus::Finalized)
-						.await
-					{
-						tracing::error!(
-							"Failed to transition order {} to Finalized: {}",
-							order.id,
-							e
-						);
+					// Transition through the proper sequence based on current state
+					match order.status {
+						OrderStatus::Created | OrderStatus::Pending => {
+							// Need to go: Current -> Executed -> Settled -> Finalized
+							if let Err(e) = self
+								.transition_through_states(
+									&order.id,
+									&[
+										OrderStatus::Executed,
+										OrderStatus::Settled,
+										OrderStatus::Finalized,
+									],
+								)
+								.await
+							{
+								tracing::error!(
+									"Failed to transition order {} through states: {}",
+									order.id,
+									e
+								);
+							}
+						}
+						OrderStatus::Executed => {
+							// Need to go: Executed -> Settled -> Finalized
+							if let Err(e) = self
+								.transition_through_states(
+									&order.id,
+									&[OrderStatus::Settled, OrderStatus::Finalized],
+								)
+								.await
+							{
+								tracing::error!(
+									"Failed to transition order {} through states: {}",
+									order.id,
+									e
+								);
+							}
+						}
+						OrderStatus::Settled => {
+							// Just need: Settled -> Finalized
+							if let Err(e) = self
+								.state_machine
+								.transition_order_status(&order.id, OrderStatus::Finalized)
+								.await
+							{
+								tracing::error!(
+									"Failed to transition order {} to Finalized: {}",
+									order.id,
+									e
+								);
+							}
+						}
+						OrderStatus::Finalized => {
+							// Already finalized, nothing to do
+						}
+						OrderStatus::Failed(_) => {
+							// Order is failed, don't transition to finalized
+							tracing::warn!("Order {} is in failed state but blockchain shows finalized - data inconsistency", order.id);
+						}
 					}
 				}
 			}
 		}
+	}
+
+	/// Transitions an order through a sequence of states.
+	///
+	/// This helper method ensures that state transitions happen in the correct order,
+	/// as required by the state machine.
+	///
+	/// # Arguments
+	///
+	/// * `order_id` - The ID of the order to transition
+	/// * `states` - The sequence of states to transition through
+	async fn transition_through_states(
+		&self,
+		order_id: &str,
+		states: &[OrderStatus],
+	) -> Result<(), RecoveryError> {
+		for state in states {
+			if let Err(e) = self
+				.state_machine
+				.transition_order_status(order_id, state.clone())
+				.await
+			{
+				return Err(RecoveryError::StateMachine(format!(
+					"Failed to transition order {} to {:?}: {}",
+					order_id, state, e
+				)));
+			}
+		}
+		Ok(())
 	}
 
 	/// Spawns a settlement monitor for an order with confirmed fill.

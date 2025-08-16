@@ -209,10 +209,10 @@ impl FileStorage {
 	/// Executes an operation with exclusive file locking on the index file.
 	async fn with_index_lock<F, Fut, R>(index_path: &Path, operation: F) -> Result<R, StorageError>
 	where
-		F: FnOnce() -> Fut,
-		Fut: std::future::Future<Output = Result<R, StorageError>>,
+		F: FnOnce() -> Fut + Send + 'static,
+		Fut: std::future::Future<Output = Result<R, StorageError>> + Send,
+		R: Send + 'static,
 	{
-		// Create lock file path
 		let lock_path = index_path.with_extension("lock");
 
 		// Ensure parent directory exists
@@ -222,26 +222,79 @@ impl FileStorage {
 			})?;
 		}
 
-		// Open or create lock file
-		let lock_file = std::fs::OpenOptions::new()
-			.create(true)
-			.truncate(true)
-			.write(true)
-			.open(&lock_path)
-			.map_err(|e| StorageError::Backend(format!("Failed to open lock file: {}", e)))?;
+		// Move to blocking thread for file operations and locking
+		let result = tokio::task::spawn_blocking(move || {
+			// Open or create lock file
+			let lock_file = std::fs::OpenOptions::new()
+				.create(true)
+				.truncate(true)
+				.write(true)
+				.open(&lock_path)
+				.map_err(|e| StorageError::Backend(format!("Failed to open lock file: {}", e)))?;
 
-		// Acquire exclusive lock (blocking)
-		lock_file
-			.lock_exclusive()
-			.map_err(|e| StorageError::Backend(format!("Failed to acquire lock: {}", e)))?;
+			// Acquire exclusive lock (blocking)
+			FileExt::lock_exclusive(&lock_file)
+				.map_err(|e| StorageError::Backend(format!("Failed to acquire lock: {}", e)))?;
 
-		// Perform operation
-		let result = operation().await;
+			Ok((lock_file,))
+		})
+		.await
+		.map_err(|e| StorageError::Backend(format!("Failed to spawn blocking task: {}", e)))?;
 
-		// Unlock (happens automatically when lock_file is dropped)
-		drop(lock_file);
+		let (_lock_file,) = result?;
 
-		result
+		// Perform operation (this runs in async context)
+		// Lock is automatically released when _lock_file is dropped
+		operation().await
+	}
+
+	/// Executes an operation with shared file locking on the index file.
+	///
+	/// This allows multiple concurrent read operations while preventing writes.
+	async fn with_index_read_lock<F, Fut, R>(
+		index_path: &Path,
+		operation: F,
+	) -> Result<R, StorageError>
+	where
+		F: FnOnce() -> Fut + Send + 'static,
+		Fut: std::future::Future<Output = Result<R, StorageError>> + Send,
+		R: Send + 'static,
+	{
+		let lock_path = index_path.with_extension("lock");
+
+		// Ensure parent directory exists
+		if let Some(parent) = lock_path.parent() {
+			fs::create_dir_all(parent).await.map_err(|e| {
+				StorageError::Backend(format!("Failed to create lock directory: {}", e))
+			})?;
+		}
+
+		// Move to blocking thread for file operations and locking
+		let result = tokio::task::spawn_blocking(move || {
+			// Open or create lock file (need write to create, but don't truncate for shared access)
+			let lock_file = std::fs::OpenOptions::new()
+				.create(true)
+				.truncate(false)
+				.read(true)
+				.write(true)
+				.open(&lock_path)
+				.map_err(|e| StorageError::Backend(format!("Failed to open lock file: {}", e)))?;
+
+			// Acquire shared lock (blocking)
+			FileExt::lock_shared(&lock_file).map_err(|e| {
+				StorageError::Backend(format!("Failed to acquire shared lock: {}", e))
+			})?;
+
+			Ok((lock_file,))
+		})
+		.await
+		.map_err(|e| StorageError::Backend(format!("Failed to spawn blocking task: {}", e)))?;
+
+		let (_lock_file,) = result?;
+
+		// Perform operation (this runs in async context)
+		// Lock is automatically released when _lock_file is dropped
+		operation().await
 	}
 
 	/// Updates index files when storing data.
@@ -254,8 +307,13 @@ impl FileStorage {
 		let index_path = self.base_path.join(format!("{}.index", namespace));
 		let index_path_clone = index_path.clone();
 
+		// Clone data to move into closure
+		let namespace_owned = namespace.to_string();
+		let key_owned = key.to_string();
+		let indexes_owned = indexes.clone();
+
 		// Execute with file lock
-		Self::with_index_lock(&index_path, || async move {
+		Self::with_index_lock(&index_path, move || async move {
 			// Load existing index or create new
 			let mut namespace_index = if index_path_clone.exists() {
 				let data = fs::read(&index_path_clone)
@@ -267,7 +325,7 @@ impl FileStorage {
 						// Log error but don't fail - rebuild index from scratch
 						tracing::error!(
 							"Corrupted index file for {}: {}. Rebuilding.",
-							namespace,
+							namespace_owned,
 							e
 						);
 						NamespaceIndex::default()
@@ -280,19 +338,19 @@ impl FileStorage {
 			// First, remove old index entries for this key if they exist
 			for (_, value_map) in namespace_index.indexes.iter_mut() {
 				for (_, keys) in value_map.iter_mut() {
-					keys.remove(key);
+					keys.remove(&key_owned);
 				}
 			}
 
 			// Now add new index entries
-			for (field, value) in &indexes.fields {
+			for (field, value) in &indexes_owned.fields {
 				namespace_index
 					.indexes
 					.entry(field.clone())
 					.or_default()
 					.entry(value.clone())
 					.or_default()
-					.insert(key.to_string());
+					.insert(key_owned.clone());
 			}
 
 			// Clean up empty entries
@@ -328,9 +386,10 @@ impl FileStorage {
 		}
 
 		let index_path_clone = index_path.clone();
+		let key_owned = key.to_string();
 
 		// Execute with file lock
-		Self::with_index_lock(&index_path, || async move {
+		Self::with_index_lock(&index_path, move || async move {
 			let data = fs::read(&index_path_clone)
 				.await
 				.map_err(|e| StorageError::Backend(e.to_string()))?;
@@ -340,7 +399,7 @@ impl FileStorage {
 			// Remove key from all indexes
 			for (_, value_map) in namespace_index.indexes.iter_mut() {
 				for (_, keys) in value_map.iter_mut() {
-					keys.remove(key);
+					keys.remove(&key_owned);
 				}
 			}
 
@@ -550,7 +609,7 @@ impl StorageInterface for FileStorage {
 		let index_path_clone = index_path.clone();
 
 		// Read index with shared lock (multiple readers allowed)
-		let namespace_index = Self::with_index_lock(&index_path, || async move {
+		let namespace_index = Self::with_index_read_lock(&index_path, || async move {
 			let data = fs::read(&index_path_clone)
 				.await
 				.map_err(|e| StorageError::Backend(e.to_string()))?;
