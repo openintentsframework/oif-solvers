@@ -37,10 +37,9 @@
 //! - Permit2 availability (universal but requires deployment)
 //! - Custom protocol support (token-specific features)
 
-use alloy_primitives::Address;
 use solver_types::{AvailableInput, LockKind as ApiLockKind, QuoteError};
 
-use super::registry::{TokenCapabilities, PROTOCOL_REGISTRY};
+use super::registry::PROTOCOL_REGISTRY;
 
 /// Types of resource locks supported
 #[derive(Debug, Clone)]
@@ -105,9 +104,7 @@ impl CustodyStrategy {
 			.ethereum_address()
 			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid Ethereum address: {}", e)))?;
 
-		let capabilities = self
-			.detect_token_capabilities(chain_id, token_address)
-			.await?;
+		let capabilities = PROTOCOL_REGISTRY.get_token_capabilities(chain_id, token_address);
 
 		if capabilities.supports_erc3009 {
 			Ok(CustodyDecision::Escrow {
@@ -122,14 +119,6 @@ impl CustodyStrategy {
 				"No supported settlement mechanism available for this token".to_string(),
 			))
 		}
-	}
-
-	async fn detect_token_capabilities(
-		&self,
-		chain_id: u64,
-		token_address: Address,
-	) -> Result<TokenCapabilities, QuoteError> {
-		Ok(PROTOCOL_REGISTRY.get_token_capabilities(chain_id, token_address))
 	}
 }
 

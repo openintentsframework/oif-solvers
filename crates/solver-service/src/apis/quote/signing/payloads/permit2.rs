@@ -18,7 +18,8 @@
 //! - **Domain Separation**: EIP-712 domain binding to prevent signature replay attacks
 //! - **Oracle Integration**: Embeds oracle addresses for settlement verification
 
-use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
+use crate::apis::quote::registry::PROTOCOL_REGISTRY;
+use alloy_primitives::{keccak256, B256, U256};
 use serde_json::json;
 use solver_config::Config;
 use solver_settlement::SettlementInterface;
@@ -85,7 +86,11 @@ pub fn build_permit2_batch_witness_digest(
 		.map_err(QuoteError::InvalidRequest)?;
 
 	// Permit2 verifying contract address for origin chain
-	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
+	let permit2 = PROTOCOL_REGISTRY
+		.get_permit2_address(origin_chain_id)
+		.ok_or_else(|| {
+			QuoteError::InvalidRequest(format!("Permit2 not deployed on chain {}", origin_chain_id))
+		})?;
 
 	// Oracle address (per origin chain) from the settlement implementation
 	let input_oracle = settlement
@@ -217,23 +222,13 @@ pub fn build_permit2_batch_witness_digest(
 
 /// Build an ERC-7930 interop address for Permit2 domain (no name/version carried here).
 pub fn permit2_domain_address_from_config(
-	config: &Config,
-	chain_id: u64,
-) -> Result<InteropAddress, QuoteError> {
-	let permit2 = resolve_permit2_address(config, chain_id)?;
-	Ok(InteropAddress::new_ethereum(chain_id, permit2))
-}
-
-/// Resolve the Permit2 address for a given chain.
-/// Permit2 is deployed at the same address across all supported chains.
-pub fn resolve_permit2_address(
 	_config: &Config,
 	chain_id: u64,
-) -> Result<AlloyAddress, QuoteError> {
-	use crate::apis::quote::registry::PROTOCOL_REGISTRY;
-	PROTOCOL_REGISTRY
+) -> Result<InteropAddress, QuoteError> {
+	let permit2 = PROTOCOL_REGISTRY
 		.get_permit2_address(chain_id)
 		.ok_or_else(|| {
 			QuoteError::InvalidRequest(format!("Permit2 not deployed on chain {}", chain_id))
-		})
+		})?;
+	Ok(InteropAddress::new_ethereum(chain_id, permit2))
 }
