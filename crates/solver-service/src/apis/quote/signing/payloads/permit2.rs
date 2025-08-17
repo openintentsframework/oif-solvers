@@ -230,20 +230,10 @@ pub fn resolve_permit2_address(
 	_config: &Config,
 	chain_id: u64,
 ) -> Result<AlloyAddress, QuoteError> {
-	// Permit2 canonical deployment address
-	const PERMIT2_ADDRESS: &str = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-
-	// Known chains with Permit2 deployed
-	const PERMIT2_CHAINS: &[u64] = &[1, 137, 42161, 10, 8453, 31337, 31338];
-
-	if PERMIT2_CHAINS.contains(&chain_id) {
-		PERMIT2_ADDRESS.parse().map_err(|e| {
-			QuoteError::InvalidRequest(format!("Failed to parse Permit2 address: {}", e))
+	use crate::apis::quote::registry::PROTOCOL_REGISTRY;
+	PROTOCOL_REGISTRY
+		.get_permit2_address(chain_id)
+		.ok_or_else(|| {
+			QuoteError::InvalidRequest(format!("Permit2 not deployed on chain {}", chain_id))
 		})
-	} else {
-		Err(QuoteError::InvalidRequest(format!(
-			"Permit2 not deployed on chain {}",
-			chain_id
-		)))
-	}
 }

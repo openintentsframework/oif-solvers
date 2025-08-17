@@ -244,7 +244,7 @@ primary = "simple"
 
 [settlement]
 [settlement.implementations.test]
-standard = "test"
+order = "test"
 network_ids = [1, 2]
 "#;
 
@@ -315,7 +315,7 @@ primary = "simple"
 
 [settlement]
 [settlement.implementations.test]
-standard = "test"
+order = "test"
 network_ids = [1, 2]
 "#;
 

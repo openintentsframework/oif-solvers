@@ -37,7 +37,10 @@
 //! - Permit2 availability (universal but requires deployment)
 //! - Custom protocol support (token-specific features)
 
+use alloy_primitives::Address;
 use solver_types::{AvailableInput, LockKind as ApiLockKind, QuoteError};
+
+use super::registry::{TokenCapabilities, PROTOCOL_REGISTRY};
 
 /// Types of resource locks supported
 #[derive(Debug, Clone)]
@@ -57,13 +60,6 @@ pub enum EscrowKind {
 pub enum CustodyDecision {
 	ResourceLock { kind: LockKind },
 	Escrow { kind: EscrowKind },
-}
-
-/// Token capabilities for settlement decisions
-#[derive(Debug, Clone)]
-pub struct TokenCapabilities {
-	pub supports_erc3009: bool,
-	pub permit2_available: bool,
 }
 
 /// Custody strategy decision engine
@@ -103,7 +99,16 @@ impl CustodyStrategy {
 		let chain_id = input.asset.ethereum_chain_id().map_err(|e| {
 			QuoteError::InvalidRequest(format!("Invalid chain ID in asset address: {}", e))
 		})?;
-		let capabilities = self.get_token_capabilities(chain_id).await?;
+
+		let token_address = input
+			.asset
+			.ethereum_address()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid Ethereum address: {}", e)))?;
+
+		let capabilities = self
+			.detect_token_capabilities(chain_id, token_address)
+			.await?;
+
 		if capabilities.supports_erc3009 {
 			Ok(CustodyDecision::Escrow {
 				kind: EscrowKind::Erc3009,
@@ -119,24 +124,12 @@ impl CustodyStrategy {
 		}
 	}
 
-	async fn get_token_capabilities(&self, chain_id: u64) -> Result<TokenCapabilities, QuoteError> {
-		self.detect_token_capabilities(chain_id).await
-	}
-
 	async fn detect_token_capabilities(
 		&self,
 		chain_id: u64,
+		token_address: Address,
 	) -> Result<TokenCapabilities, QuoteError> {
-		const PERMIT2_CHAINS: &[u64] = &[1, 137, 42161, 10, 8453, 31337, 31338];
-		let permit2_available = PERMIT2_CHAINS.contains(&chain_id);
-
-		// ERC3009 support would be detected per-token in the future
-		let supports_erc3009 = false;
-
-		Ok(TokenCapabilities {
-			supports_erc3009,
-			permit2_available,
-		})
+		Ok(PROTOCOL_REGISTRY.get_token_capabilities(chain_id, token_address))
 	}
 }
 

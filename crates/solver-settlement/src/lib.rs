@@ -35,16 +35,16 @@ pub enum SettlementError {
 ///
 /// This trait must be implemented by each settlement mechanism to handle
 /// validation of fills and management of the claim process for different
-/// order standards. Each implementation must explicitly declare its supported
-/// standard and networks.
+/// order types. Each implementation must explicitly declare its supported
+/// order and networks.
 #[async_trait]
 pub trait SettlementInterface: Send + Sync {
-	/// Returns the order standard this implementation handles.
+	/// Returns the order type this implementation handles.
 	///
 	/// # Returns
-	/// A string slice representing the order standard (e.g., "eip7683").
-	/// This must match the `standard` field in Order structs.
-	fn supported_standard(&self) -> &str;
+	/// A string slice representing the order type (e.g., "eip7683").
+	/// This must match the `order` field in Order structs.
+	fn supported_order(&self) -> &str;
 
 	/// Returns the network IDs this implementation supports.
 	///
@@ -114,13 +114,13 @@ pub fn get_all_implementations() -> Vec<(&'static str, SettlementFactory)> {
 }
 
 /// Service managing settlement implementations with coverage indexing.
-/// Maintains a lookup index for O(1) settlement discovery based on standard and network.
+/// Maintains a lookup index for O(1) settlement discovery based on order and network.
 pub struct SettlementService {
 	/// Map of implementation names to their instances.
 	/// Keys are implementation type names (e.g., "direct", "optimistic").
 	implementations: HashMap<String, Box<dyn SettlementInterface>>,
 
-	/// Index for fast lookup: (standard, network_id) -> implementation_name.
+	/// Index for fast lookup: (order, network_id) -> implementation_name.
 	/// Built at initialization from implementation declarations.
 	/// Validated to have no duplicates by config layer.
 	coverage_index: HashMap<(String, u64), String>,
@@ -140,9 +140,9 @@ impl SettlementService {
 
 		// Build coverage index for O(1) runtime lookups
 		for (name, implementation) in &implementations {
-			let standard = implementation.supported_standard();
+			let order_standard = implementation.supported_order();
 			for &network_id in implementation.supported_networks() {
-				let key = (standard.to_string(), network_id);
+				let key = (order_standard.to_string(), network_id);
 				coverage_index.insert(key, name.clone());
 			}
 		}

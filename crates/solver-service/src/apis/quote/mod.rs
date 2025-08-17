@@ -65,6 +65,7 @@
 
 pub mod custody;
 pub mod generation;
+pub mod registry;
 pub mod signing;
 pub mod validation;
 

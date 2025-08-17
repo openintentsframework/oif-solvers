@@ -515,12 +515,12 @@ impl Config {
 		// Parse and validate each settlement implementation
 		for (impl_name, impl_config) in &self.settlement.implementations {
 			// Extract standard field
-			let standard = impl_config
-				.get("standard")
+			let order_standard = impl_config
+				.get("order")
 				.and_then(|v| v.as_str())
 				.ok_or_else(|| {
 					ConfigError::Validation(format!(
-						"Settlement implementation '{}' missing 'standard' field",
+						"Settlement implementation '{}' missing 'order' field",
 						impl_name
 					))
 				})?;
@@ -545,12 +545,12 @@ impl Config {
 					))
 				})? as u64;
 
-				let key = (standard.to_string(), network_id);
+				let key = (order_standard.to_string(), network_id);
 
 				if let Some(existing) = coverage.insert(key.clone(), impl_name.clone()) {
 					return Err(ConfigError::Validation(format!(
-						"Duplicate settlement coverage for standard '{}' on network {}: '{}' and '{}'",
-						standard, network_id, existing, impl_name
+						"Duplicate settlement coverage for order '{}' on network {}: '{}' and '{}'",
+						order_standard, network_id, existing, impl_name
 					)));
 				}
 
@@ -684,7 +684,7 @@ primary = "simple"
 
 [settlement]
 [settlement.implementations.test]
-standard = "test"
+order = "test"
 network_ids = [1, 2]
 "#;
 
@@ -752,11 +752,11 @@ primary = "simple"
 [order.strategy.implementations.simple]
 
 [settlement.implementations.impl1]
-standard = "eip7683"
+order = "eip7683"
 network_ids = [1, 2]
 
 [settlement.implementations.impl2]
-standard = "eip7683"
+order = "eip7683"
 network_ids = [2, 3]  # Network 2 overlaps with impl1
 "#;
 
@@ -881,7 +881,7 @@ primary = "simple"
 [order.strategy.implementations.simple]
 
 [settlement.implementations.impl1]
-standard = "eip7683"
+order = "eip7683"
 network_ids = [1, 2, 999]  # Network 999 doesn't exist
 "#;
 
@@ -940,7 +940,7 @@ primary = "simple"
 [order.strategy.implementations.simple]
 
 [settlement.implementations.impl1]
-standard = "eip7683"  # Only covers eip7683, not eip9999
+order = "eip7683"  # Only covers eip7683, not eip9999
 network_ids = [1, 2]
 "#;
 

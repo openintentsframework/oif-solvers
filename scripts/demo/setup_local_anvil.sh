@@ -517,7 +517,7 @@ chain_id = 1
 address = "$INPUT_SETTLER"
 
 [settlement.implementations.direct]
-standard = "eip7683"
+order = "eip7683"
 network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
 oracle_addresses = { $ORIGIN_CHAIN_ID = "$ORACLE", $DEST_CHAIN_ID = "$ORACLE" }
 dispute_period_seconds = 1

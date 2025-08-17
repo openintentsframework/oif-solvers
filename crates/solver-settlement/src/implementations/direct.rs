@@ -22,8 +22,8 @@ use std::collections::HashMap;
 /// This implementation validates fills by checking transaction receipts
 /// and manages dispute periods before allowing claims.
 pub struct DirectSettlement {
-	/// The order standard this implementation handles
-	standard: String,
+	/// The order type this implementation handles
+	order: String,
 	/// Supported network IDs
 	network_ids: Vec<u64>,
 	/// RPC providers for each supported network.
@@ -40,7 +40,7 @@ impl DirectSettlement {
 	/// Configures settlement validation with multiple networks, oracle addresses,
 	/// and dispute period.
 	pub async fn new(
-		standard: String,
+		order: String,
 		network_ids: Vec<u64>,
 		networks: &NetworksConfig,
 		oracle_addresses: HashMap<u64, String>,
@@ -80,7 +80,7 @@ impl DirectSettlement {
 		}
 
 		Ok(Self {
-			standard,
+			order,
 			network_ids: network_ids.clone(),
 			providers,
 			oracle_addresses: validated_oracle_addresses,
@@ -105,7 +105,7 @@ impl ConfigSchema for DirectSettlementSchema {
 		let schema = Schema::new(
 			// Required fields
 			vec![
-				Field::new("standard", FieldType::String),
+				Field::new("order", FieldType::String),
 				Field::new(
 					"network_ids",
 					FieldType::Array(Box::new(FieldType::Integer {
@@ -160,8 +160,8 @@ impl ConfigSchema for DirectSettlementSchema {
 
 #[async_trait]
 impl SettlementInterface for DirectSettlement {
-	fn supported_standard(&self) -> &str {
-		&self.standard
+	fn supported_order(&self) -> &str {
+		&self.order
 	}
 
 	fn supported_networks(&self) -> &[u64] {
@@ -342,7 +342,7 @@ impl SettlementInterface for DirectSettlement {
 /// Factory function to create a settlement provider from configuration.
 ///
 /// Required configuration parameters:
-/// - `standard`: The order standard this implementation handles (e.g., "eip7683")
+/// - `order`: The order type this implementation handles (e.g., "eip7683")
 /// - `network_ids`: Array of network IDs to monitor
 /// - `oracle_addresses`: Table mapping network_id -> oracle address
 ///
@@ -356,11 +356,11 @@ pub fn create_settlement(
 	DirectSettlementSchema::validate_config(config)
 		.map_err(|e| SettlementError::ValidationFailed(format!("Invalid configuration: {}", e)))?;
 
-	// Get standard
-	let standard = config
-		.get("standard")
+	// Get order type
+	let order_standard = config
+		.get("order")
 		.and_then(|v| v.as_str())
-		.ok_or_else(|| SettlementError::ValidationFailed("standard is required".to_string()))?
+		.ok_or_else(|| SettlementError::ValidationFailed("order is required".to_string()))?
 		.to_string();
 
 	// Get network IDs
@@ -411,7 +411,7 @@ pub fn create_settlement(
 	let settlement = tokio::task::block_in_place(|| {
 		tokio::runtime::Handle::current().block_on(async {
 			DirectSettlement::new(
-				standard,
+				order_standard,
 				network_ids,
 				networks,
 				oracle_addresses,
