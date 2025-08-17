@@ -1,24 +1,82 @@
+//! Quote generation engine for cross-chain intent execution.
+//!
+//! This module orchestrates the creation of executable quotes for cross-chain token transfers.
+//! It combines custody decisions, settlement mechanisms, and signature requirements to produce
+//! complete quote objects that users can sign and submit for execution.
+//!
+//! ## Overview
+//!
+//! The quote generator:
+//! - Analyzes available inputs and requested outputs
+//! - Determines optimal custody and settlement strategies
+//! - Generates appropriate signature payloads
+//! - Calculates execution timelines and expiry
+//! - Produces multiple quote options when available
+//!
+//! ## Quote Structure
+//!
+//! Each generated quote contains:
+//! - **Orders**: Signature requirements (EIP-712, ERC-3009, etc.)
+//! - **Details**: Input/output specifications
+//! - **Validity**: Expiry times and execution windows
+//! - **ETA**: Estimated completion time based on chain characteristics
+//! - **Provider**: Solver identification
+//!
+//! ## Generation Process
+//!
+//! 1. **Input Analysis**: Evaluate each available input for capabilities
+//! 2. **Custody Decision**: Determine optimal token custody mechanism
+//! 3. **Order Creation**: Generate appropriate signature payloads
+//! 4. **Quote Assembly**: Combine all components into executable quotes
+//! 5. **Preference Sorting**: Order quotes based on user preferences
+//!
+//! ## Supported Order Types
+//!
+//! ### Resource Locks
+//! - TheCompact orders with allocation proofs
+//! - Custom protocol-specific lock orders
+//!
+//! ### Escrow Orders
+//! - Permit2 batch witness transfers
+//! - ERC-3009 authorization transfers
+//!
+//! ## Optimization Strategies
+//!
+//! The generator optimizes for:
+//! - **Speed**: Minimal execution time across chains
+//! - **Cost**: Lowest gas fees and protocol costs
+//! - **Trust**: Minimal trust assumptions
+//! - **Input Priority**: Preference for specific input tokens
+
 use super::custody::{CustodyDecision, CustodyStrategy, EscrowKind, LockKind};
 use crate::apis::quote::permit2::{
 	build_permit2_batch_witness_digest, permit2_domain_address_from_config,
 };
 use solver_config::Config;
-use solver_settlement::SettlementService;
+use solver_settlement::{SettlementInterface, SettlementService};
 use solver_types::{
-	GetQuoteRequest, InteropAddress, Quote, QuoteDetails, QuoteError, QuoteOrder, QuotePreference,
-	SignatureType,
+	with_0x_prefix, GetQuoteRequest, InteropAddress, Quote, QuoteDetails, QuoteError, QuoteOrder,
+	QuotePreference, SignatureType,
 };
+use std::sync::Arc;
 use uuid::Uuid;
 
-/// Quote generation engine
+/// Quote generation engine with settlement service integration.
 pub struct QuoteGenerator {
 	custody_strategy: CustodyStrategy,
+	/// Reference to settlement service for implementation lookup.
+	settlement_service: Arc<SettlementService>,
 }
 
 impl QuoteGenerator {
-	pub fn new() -> Self {
+	/// Creates a new quote generator.
+	///
+	/// # Arguments
+	/// * `settlement_service` - Service managing settlement implementations
+	pub fn new(settlement_service: Arc<SettlementService>) -> Self {
 		Self {
 			custody_strategy: CustodyStrategy::new(),
+			settlement_service,
 		}
 	}
 
@@ -26,13 +84,12 @@ impl QuoteGenerator {
 		&self,
 		request: &GetQuoteRequest,
 		config: &Config,
-		settlement: &SettlementService,
 	) -> Result<Vec<Quote>, QuoteError> {
 		let mut quotes = Vec::new();
 		for input in &request.available_inputs {
-			let settlement_decision = self.custody_strategy.decide_custody(input).await?;
+			let custody_decision = self.custody_strategy.decide_custody(input).await?;
 			if let Ok(quote) = self
-				.generate_quote_for_settlement(request, config, &settlement_decision, settlement)
+				.generate_quote_for_settlement(request, config, &custody_decision)
 				.await
 			{
 				quotes.push(quote);
@@ -49,16 +106,15 @@ impl QuoteGenerator {
 		&self,
 		request: &GetQuoteRequest,
 		config: &Config,
-		settlement_decision: &CustodyDecision,
-		settlement: &SettlementService,
+		custody_decision: &CustodyDecision,
 	) -> Result<Quote, QuoteError> {
 		let quote_id = Uuid::new_v4().to_string();
-		let order = match settlement_decision {
+		let order = match custody_decision {
 			CustodyDecision::ResourceLock { kind } => {
 				self.generate_resource_lock_order(request, config, kind)?
 			}
 			CustodyDecision::Escrow { kind } => {
-				self.generate_escrow_order(request, config, kind, settlement)?
+				self.generate_escrow_order(request, config, kind)?
 			}
 		};
 		let details = QuoteDetails {
@@ -102,8 +158,27 @@ impl QuoteGenerator {
 		request: &GetQuoteRequest,
 		config: &Config,
 		escrow_kind: &EscrowKind,
-		settlement: &SettlementService,
 	) -> Result<QuoteOrder, QuoteError> {
+		// Standard determined by business logic context
+		// Currently we only support EIP7683
+		let standard = "eip7683";
+
+		// Extract chain from first output to find appropriate settlement
+		// TODO: Implement support for multiple destination chains
+		let chain_id = request
+			.requested_outputs
+			.first()
+			.ok_or_else(|| QuoteError::InvalidRequest("No requested outputs".to_string()))?
+			.asset
+			.ethereum_chain_id()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid chain ID: {}", e)))?;
+
+		// Lookup settlement for exact standard and network
+		let settlement = self
+			.settlement_service
+			.find_settlement_for_standard_and_network(standard, chain_id)
+			.map_err(|e| QuoteError::InvalidRequest(e.to_string()))?;
+
 		match escrow_kind {
 			EscrowKind::Permit2 => self.generate_permit2_order(request, config, settlement),
 			EscrowKind::Erc3009 => self.generate_erc3009_order(request, config),
@@ -114,10 +189,9 @@ impl QuoteGenerator {
 		&self,
 		request: &GetQuoteRequest,
 		config: &Config,
-		settlement: &SettlementService,
+		settlement: &dyn SettlementInterface,
 	) -> Result<QuoteOrder, QuoteError> {
 		use alloy_primitives::hex;
-		use solver_types::utils::with_0x_prefix;
 
 		let chain_id = request.available_inputs[0]
 			.asset
@@ -232,11 +306,5 @@ impl QuoteGenerator {
 			Some(QuotePreference::InputPriority) => {}
 			Some(QuotePreference::Price) | Some(QuotePreference::TrustMinimization) | None => {}
 		}
-	}
-}
-
-impl Default for QuoteGenerator {
-	fn default() -> Self {
-		Self::new()
 	}
 }

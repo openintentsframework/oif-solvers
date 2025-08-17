@@ -50,27 +50,16 @@ pub async fn start_server(
 		.timeout(std::time::Duration::from_secs(30))
 		.build()?;
 
-	// Extract discovery service URL once during startup from config
+	// Extract discovery service URL once during startup
 	let discovery_url = api_config
 		.implementations
 		.discovery
 		.as_ref()
 		.and_then(|discovery_impl| {
-			config
-				.discovery
-				.sources
-				.get(discovery_impl)
-				.map(|discovery_config| {
-					let api_host = discovery_config
-						.get("api_host")
-						.and_then(|v| v.as_str())
-						.unwrap_or("127.0.0.1");
-					let api_port = discovery_config
-						.get("api_port")
-						.and_then(|v| v.as_integer())
-						.unwrap_or(8081) as u16;
-					format!("http://{}:{}/intent", api_host, api_port)
-				})
+			solver.discovery().get_url(discovery_impl).map(|url| {
+				// Format as complete URL with /intent endpoint
+				format!("http://{}/intent", url)
+			})
 		});
 
 	if let Some(ref url) = discovery_url {

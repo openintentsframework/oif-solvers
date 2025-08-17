@@ -3,11 +3,20 @@
 //! This module provides structures and utilities for managing solver configuration.
 //! It supports loading configuration from TOML files and provides validation to ensure
 //! all required configuration values are properly set.
+//!
+//! ## Modular Configuration Support
+//!
+//! Configurations can be split into multiple files for better organization:
+//! - Use `include = ["file1.toml", "file2.toml"]` to include other config files
+//! - Each top-level section must be unique across all files (no duplicates allowed)
+
+mod loader;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use solver_types::{networks::deserialize_networks, NetworksConfig};
 use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -103,9 +112,9 @@ pub struct StorageConfig {
 /// Configuration for delivery mechanisms.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DeliveryConfig {
-	/// Map of delivery provider names to their configurations.
-	/// Each provider has its own configuration format stored as raw TOML values.
-	pub providers: HashMap<String, toml::Value>,
+	/// Map of delivery implementation names to their configurations.
+	/// Each implementation has its own configuration format stored as raw TOML values.
+	pub implementations: HashMap<String, toml::Value>,
 	/// Minimum number of confirmations required for transactions.
 	/// Defaults to 12 confirmations if not specified.
 	#[serde(default = "default_confirmations")]
@@ -123,18 +132,18 @@ fn default_confirmations() -> u64 {
 /// Configuration for account management.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AccountConfig {
-	/// The type of account provider to use (e.g., "local", "aws-kms", "hardware").
-	pub provider: String,
-	/// Provider-specific configuration parameters as raw TOML values.
-	pub config: toml::Value,
+	/// Which implementation to use as primary.
+	pub primary: String,
+	/// Map of account implementation names to their configurations.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for order discovery.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DiscoveryConfig {
-	/// Map of discovery source names to their configurations.
-	/// Each source has its own configuration format stored as raw TOML values.
-	pub sources: HashMap<String, toml::Value>,
+	/// Map of discovery implementation names to their configurations.
+	/// Each implementation has its own configuration format stored as raw TOML values.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for order processing.
@@ -144,16 +153,16 @@ pub struct OrderConfig {
 	/// Each implementation handles specific order types.
 	pub implementations: HashMap<String, toml::Value>,
 	/// Strategy configuration for order execution.
-	pub execution_strategy: StrategyConfig,
+	pub strategy: StrategyConfig,
 }
 
 /// Configuration for execution strategies.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StrategyConfig {
-	/// The type of strategy to use (e.g., "fifo", "priority", "custom").
-	pub strategy_type: String,
-	/// Strategy-specific configuration parameters as raw TOML values.
-	pub config: toml::Value,
+	/// Which strategy implementation to use as primary.
+	pub primary: String,
+	/// Map of strategy implementation names to their configurations.
+	pub implementations: HashMap<String, toml::Value>,
 }
 
 /// Configuration for settlement operations.
@@ -172,10 +181,6 @@ pub struct SettlementConfig {
 /// These must match the names of configured implementations in their respective sections.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ApiImplementations {
-	/// Settlement implementation to use for quote generation.
-	/// Must match one of the configured implementations in [settlement.implementations].
-	/// Used by the /quotes endpoint to determine oracle addresses and settlement parameters.
-	pub settlement: String,
 	/// Discovery implementation to use for order forwarding.
 	/// Must match one of the configured implementations in [discovery.implementations].
 	/// Used by the /orders endpoint to forward intent submissions to the discovery service.
@@ -268,7 +273,7 @@ fn default_max_request_size() -> usize {
 /// Supports default values with ${VAR_NAME:-default_value}.
 ///
 /// Input strings are limited to 1MB to prevent ReDoS attacks.
-fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
+pub(crate) fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 	// Limit input size to prevent ReDoS attacks
 	const MAX_INPUT_SIZE: usize = 1024 * 1024; // 1MB
 	if input.len() > MAX_INPUT_SIZE {
@@ -316,29 +321,21 @@ fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 }
 
 impl Config {
-	/// Loads configuration from a file at the specified path.
-	///
-	/// This method reads the file content, resolves environment variables,
-	/// and parses it as TOML configuration. The configuration is validated
-	/// before being returned.
-	///
-	/// Environment variables can be referenced using:
-	/// - `${VAR_NAME}` - Required environment variable
-	/// - `${VAR_NAME:-default}` - With default value if not set
-	pub fn from_file(path: &str) -> Result<Self, ConfigError> {
-		let content = std::fs::read_to_string(path)?;
-		let resolved = resolve_env_vars(&content)?;
-		resolved.parse()
-	}
-
 	/// Loads configuration from a file with async environment variable resolution.
 	///
-	/// This method is async-ready for future extensions that might need
-	/// async secret resolution (e.g., from Vault, AWS KMS, etc).
-	pub async fn from_file_async(path: &str) -> Result<Self, ConfigError> {
-		// For now, just calls the sync version
-		// In the future, this could use async resolvers
-		Self::from_file(path)
+	/// This method supports modular configuration through include directives:
+	/// - `include = ["file1.toml", "file2.toml"]` - Include specific files
+	///
+	/// Each top-level section must be unique across all configuration files.
+	pub async fn from_file(path: &str) -> Result<Self, ConfigError> {
+		let path_buf = Path::new(path);
+		let base_dir = path_buf.parent().unwrap_or_else(|| Path::new("."));
+
+		let mut loader = loader::ConfigLoader::new(base_dir);
+		let file_name = path_buf
+			.file_name()
+			.ok_or_else(|| ConfigError::Validation(format!("Invalid path: {}", path)))?;
+		loader.load_config(file_name).await
 	}
 
 	/// Validates the configuration to ensure all required fields are properly set.
@@ -423,9 +420,9 @@ impl Config {
 		}
 
 		// Validate delivery config
-		if self.delivery.providers.is_empty() {
+		if self.delivery.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"At least one delivery provider required".into(),
+				"At least one delivery implementation required".into(),
 			));
 		}
 
@@ -442,16 +439,16 @@ impl Config {
 		}
 
 		// Validate account config
-		if self.account.provider.is_empty() {
+		if self.account.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"Account provider cannot be empty".into(),
+				"Account implementation cannot be empty".into(),
 			));
 		}
 
 		// Validate discovery config
-		if self.discovery.sources.is_empty() {
+		if self.discovery.implementations.is_empty() {
 			return Err(ConfigError::Validation(
-				"At least one discovery source required".into(),
+				"At least one discovery implementation required".into(),
 			));
 		}
 
@@ -461,9 +458,14 @@ impl Config {
 				"At least one order implementation required".into(),
 			));
 		}
-		if self.order.execution_strategy.strategy_type.is_empty() {
+		if self.order.strategy.primary.is_empty() {
 			return Err(ConfigError::Validation(
-				"Execution strategy type cannot be empty".into(),
+				"Order strategy primary cannot be empty".into(),
+			));
+		}
+		if self.order.strategy.implementations.is_empty() {
+			return Err(ConfigError::Validation(
+				"At least one strategy implementation required".into(),
 			));
 		}
 
@@ -477,27 +479,102 @@ impl Config {
 		// Validate API config if enabled
 		if let Some(ref api) = self.api {
 			if api.enabled {
-				// Validate settlement implementation exists
-				if !self
-					.settlement
-					.implementations
-					.contains_key(&api.implementations.settlement)
-				{
-					return Err(ConfigError::Validation(format!(
-						"API settlement implementation '{}' not found in settlement.implementations",
-						api.implementations.settlement
-					)));
-				}
-
 				// Validate discovery implementation exists if specified
 				if let Some(ref discovery) = api.implementations.discovery {
-					if !self.discovery.sources.contains_key(discovery) {
+					if !self.discovery.implementations.contains_key(discovery) {
 						return Err(ConfigError::Validation(format!(
 							"API discovery implementation '{}' not found in discovery.implementations",
 							discovery
 						)));
 					}
 				}
+			}
+		}
+
+		// Validate settlement configurations and coverage
+		self.validate_settlement_coverage()?;
+
+		Ok(())
+	}
+
+	/// Validates settlement implementation coverage.
+	///
+	/// # Returns
+	/// * `Ok(())` if coverage is valid and complete
+	/// * `Err(ConfigError::Validation)` with specific error
+	///
+	/// # Validation Rules
+	/// 1. Each settlement must declare 'standard' and 'network_ids'
+	/// 2. No two settlements may cover same standard+network
+	/// 3. Every order standard must have at least one settlement
+	/// 4. All network_ids must exist in networks configuration
+	fn validate_settlement_coverage(&self) -> Result<(), ConfigError> {
+		// Track coverage: (standard, network_id) -> implementation_name
+		let mut coverage: HashMap<(String, u64), String> = HashMap::new();
+
+		// Parse and validate each settlement implementation
+		for (impl_name, impl_config) in &self.settlement.implementations {
+			// Extract standard field
+			let standard = impl_config
+				.get("standard")
+				.and_then(|v| v.as_str())
+				.ok_or_else(|| {
+					ConfigError::Validation(format!(
+						"Settlement implementation '{}' missing 'standard' field",
+						impl_name
+					))
+				})?;
+
+			// Extract network_ids
+			let network_ids = impl_config
+				.get("network_ids")
+				.and_then(|v| v.as_array())
+				.ok_or_else(|| {
+					ConfigError::Validation(format!(
+						"Settlement implementation '{}' missing 'network_ids' field",
+						impl_name
+					))
+				})?;
+
+			// Check for duplicate coverage
+			for network_value in network_ids {
+				let network_id = network_value.as_integer().ok_or_else(|| {
+					ConfigError::Validation(format!(
+						"Invalid network_id in settlement '{}'",
+						impl_name
+					))
+				})? as u64;
+
+				let key = (standard.to_string(), network_id);
+
+				if let Some(existing) = coverage.insert(key.clone(), impl_name.clone()) {
+					return Err(ConfigError::Validation(format!(
+						"Duplicate settlement coverage for standard '{}' on network {}: '{}' and '{}'",
+						standard, network_id, existing, impl_name
+					)));
+				}
+
+				// Validate network exists in networks config
+				if !self.networks.contains_key(&network_id) {
+					return Err(ConfigError::Validation(format!(
+						"Settlement '{}' references network {} which doesn't exist in networks config",
+						impl_name, network_id
+					)));
+				}
+			}
+		}
+
+		// Validate all order implementations have settlement coverage
+		for order_standard in self.order.implementations.keys() {
+			// Orders might not specify networks directly, but we need to ensure
+			// the standard is covered somewhere
+			let has_coverage = coverage.keys().any(|(std, _)| std == order_standard);
+
+			if !has_coverage {
+				return Err(ConfigError::Validation(format!(
+					"Order standard '{}' has no settlement implementations",
+					order_standard
+				)));
 			}
 		}
 
@@ -589,24 +666,26 @@ cleanup_interval_seconds = 3600
 [storage.implementations.memory]
 
 [delivery]
-[delivery.providers.test]
+[delivery.implementations.test]
 
 [account]
-provider = "local"
-[account.config]
+primary = "local"
+[account.implementations.local]
 private_key = "${TEST_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 
 [discovery]
-[discovery.sources.test]
+[discovery.implementations.test]
 
 [order]
 [order.implementations.test]
-[order.execution_strategy]
-strategy_type = "simple"
-[order.execution_strategy.config]
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
 
 [settlement]
 [settlement.implementations.test]
+standard = "test"
+network_ids = [1, 2]
 "#;
 
 		let config: Config = config_str.parse().unwrap();
@@ -614,5 +693,262 @@ strategy_type = "simple"
 
 		// Clean up
 		std::env::remove_var("TEST_SOLVER_ID");
+	}
+
+	#[test]
+	fn test_duplicate_settlement_coverage_rejected() {
+		let config_str = r#"
+[solver]
+id = "test"
+monitoring_timeout_minutes = 5
+
+[networks.1]
+rpc_url = "http://localhost:8545"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.1.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[networks.2]
+rpc_url = "http://localhost:8546"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.2.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[networks.3]
+rpc_url = "http://localhost:8547"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.3.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[storage]
+primary = "memory"
+cleanup_interval_seconds = 3600
+[storage.implementations.memory]
+
+[delivery]
+[delivery.implementations.test]
+
+[account]
+primary = "local"
+[account.implementations.local]
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[discovery]
+[discovery.implementations.test]
+
+[order]
+[order.implementations.eip7683]
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
+
+[settlement.implementations.impl1]
+standard = "eip7683"
+network_ids = [1, 2]
+
+[settlement.implementations.impl2]
+standard = "eip7683"
+network_ids = [2, 3]  # Network 2 overlaps with impl1
+"#;
+
+		let result = Config::from_str(config_str);
+		assert!(result.is_err());
+		let err = result.unwrap_err();
+		// The test should fail because network 2 is covered by both impl1 and impl2
+		// Check for the key parts of the error message
+		let error_msg = err.to_string();
+		assert!(
+			error_msg.contains("network 2")
+				&& error_msg.contains("impl1")
+				&& error_msg.contains("impl2"),
+			"Expected duplicate coverage error for network 2, got: {}",
+			err
+		);
+	}
+
+	#[test]
+	fn test_missing_settlement_standard_rejected() {
+		let config_str = r#"
+[solver]
+id = "test"
+monitoring_timeout_minutes = 5
+
+[networks.1]
+rpc_url = "http://localhost:8545"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.1.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[networks.2]
+rpc_url = "http://localhost:8546"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.2.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[storage]
+primary = "memory"
+cleanup_interval_seconds = 3600
+[storage.implementations.memory]
+
+[delivery]
+[delivery.implementations.test]
+
+[account]
+primary = "local"
+[account.implementations.local]
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[discovery]
+[discovery.implementations.test]
+
+[order]
+[order.implementations.eip7683]
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
+
+[settlement.implementations.impl1]
+# Missing 'standard' field
+network_ids = [1, 2]
+"#;
+
+		let result = Config::from_str(config_str);
+		assert!(result.is_err());
+		let err = result.unwrap_err();
+		assert!(err.to_string().contains("missing 'standard' field"));
+	}
+
+	#[test]
+	fn test_settlement_references_invalid_network() {
+		let config_str = r#"
+[solver]
+id = "test"
+monitoring_timeout_minutes = 5
+
+[networks.1]
+rpc_url = "http://localhost:8545"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.1.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[networks.2]
+rpc_url = "http://localhost:8546"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.2.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[storage]
+primary = "memory"
+cleanup_interval_seconds = 3600
+[storage.implementations.memory]
+
+[delivery]
+[delivery.implementations.test]
+
+[account]
+primary = "local"
+[account.implementations.local]
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[discovery]
+[discovery.implementations.test]
+
+[order]
+[order.implementations.eip7683]
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
+
+[settlement.implementations.impl1]
+standard = "eip7683"
+network_ids = [1, 2, 999]  # Network 999 doesn't exist
+"#;
+
+		let result = Config::from_str(config_str);
+		assert!(result.is_err());
+		let err = result.unwrap_err();
+		assert!(err.to_string().contains("references network 999"));
+	}
+
+	#[test]
+	fn test_order_standard_without_settlement() {
+		let config_str = r#"
+[solver]
+id = "test"
+monitoring_timeout_minutes = 5
+
+[networks.1]
+rpc_url = "http://localhost:8545"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.1.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[networks.2]
+rpc_url = "http://localhost:8546"
+input_settler_address = "0x1234567890123456789012345678901234567890"
+output_settler_address = "0x0987654321098765432109876543210987654321"
+[[networks.2.tokens]]
+address = "0xabcdef1234567890abcdef1234567890abcdef12"
+symbol = "TEST"
+decimals = 18
+
+[storage]
+primary = "memory"
+cleanup_interval_seconds = 3600
+[storage.implementations.memory]
+
+[delivery]
+[delivery.implementations.test]
+
+[account]
+primary = "local"
+[account.implementations.local]
+private_key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+[discovery]
+[discovery.implementations.test]
+
+[order]
+[order.implementations.eip7683]
+[order.implementations.eip9999]  # Order standard with no settlement
+[order.strategy]
+primary = "simple"
+[order.strategy.implementations.simple]
+
+[settlement.implementations.impl1]
+standard = "eip7683"  # Only covers eip7683, not eip9999
+network_ids = [1, 2]
+"#;
+
+		let result = Config::from_str(config_str);
+		assert!(result.is_err());
+		let err = result.unwrap_err();
+		assert!(err
+			.to_string()
+			.contains("Order standard 'eip9999' has no settlement"));
 	}
 }
