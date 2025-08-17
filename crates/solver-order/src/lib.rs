@@ -22,6 +22,17 @@ pub mod implementations {
 	}
 }
 
+pub mod quote {
+    pub mod custody_strategy;
+    pub mod generator;
+}
+
+pub mod signing {
+    pub mod payloads {
+        pub mod permit2;
+    }
+}
+
 /// Errors that can occur during order processing operations.
 #[derive(Debug, Error)]
 pub enum OrderError {

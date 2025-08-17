@@ -1,86 +1,50 @@
-//! EIP-712 helpers for Quote API: builds Permit2 batch-witness digest.
-//! Uses generic EIP-712 utilities from `solver-types`.
+//! Permit2 EIP-712 payload builder (moved from solver-service)
 
 use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
-use alloy_primitives::hex;
 use serde_json::json;
 use solver_config::Config;
+use solver_settlement::resolve_oracle_address as settlement_resolve_oracle_address;
 use solver_types::{
-	utils::{compute_final_digest, Eip712AbiEncoder}, with_0x_prefix, GetQuoteRequest, InteropAddress, QuoteError
+	utils::{compute_final_digest, Eip712AbiEncoder}, GetQuoteRequest, InteropAddress, QuoteError,
 };
-
 use solver_types::utils::{
-	DOMAIN_TYPE,
-	MANDATE_OUTPUT_TYPE,
-	NAME_PERMIT2,
-	PERMIT2_WITNESS_TYPE,
-	PERMIT_BATCH_WITNESS_TYPE,
+	DOMAIN_TYPE, MANDATE_OUTPUT_TYPE, NAME_PERMIT2, PERMIT2_WITNESS_TYPE, PERMIT_BATCH_WITNESS_TYPE,
 	TOKEN_PERMISSIONS_TYPE,
 };
 use solver_types::utils::bytes20_to_alloy_address;
-use solver_settlement::resolve_oracle_address as settlement_resolve_oracle_address;
 
-/// Computes the EIP-712 final digest for Permit2's
-/// `PermitBatchWitnessTransferFrom` with a single permitted token and single output.
-/// Returns `(final_digest_hex, message_json)` used for client signing and verification.
 pub fn build_permit2_batch_witness_digest(
 	request: &GetQuoteRequest,
 	config: &Config,
-) -> Result<(String, serde_json::Value), QuoteError> {
-	// Resolve origin/destination context
+) -> Result<(B256, serde_json::Value), QuoteError> {
 	let input = &request.available_inputs[0];
-	let output = &request.requested_outputs.get(0).ok_or_else(|| {
-		QuoteError::InvalidRequest("At least one requested output is required".to_string())
-	})?;
+	let output = &request
+		.requested_outputs
+		.get(0)
+		.ok_or_else(|| QuoteError::InvalidRequest("At least one requested output is required".to_string()))?;
 
-	let origin_chain_id = input.asset.ethereum_chain_id().map_err(|e| {
-		QuoteError::InvalidRequest(format!("Invalid origin chain ID in asset address: {}", e))
-	})?;
-	let dest_chain_id = output
-		.asset
-		.ethereum_chain_id()
-		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination chain ID: {}", e)))?;
+	let origin_chain_id = input.asset.ethereum_chain_id().map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin chain ID in asset address: {}", e)))?;
+	let dest_chain_id = output.asset.ethereum_chain_id().map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination chain ID: {}", e)))?;
 
-	let origin_token = input
-		.asset
-		.ethereum_address()
-		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin token address: {}", e)))?;
-	let dest_token = output.asset.ethereum_address().map_err(|e| {
-		QuoteError::InvalidRequest(format!("Invalid destination token address: {}", e))
-	})?;
-	let recipient = output
-		.receiver
-		.ethereum_address()
-		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid recipient address: {}", e)))?;
+	let origin_token = input.asset.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin token address: {}", e)))?;
+	let dest_token = output.asset.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination token address: {}", e)))?;
+	let recipient = output.receiver.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid recipient address: {}", e)))?;
 
 	let amount: U256 = input.amount;
 
 	// Spender = INPUT settler on origin chain
-	let origin_net = config.networks.get(&origin_chain_id).ok_or_else(|| {
-		QuoteError::InvalidRequest(format!(
-			"Origin chain {} missing from networks config",
-			origin_chain_id
-		))
-	})?;
-	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+	let origin_net = config.networks.get(&origin_chain_id).ok_or_else(|| QuoteError::InvalidRequest(format!("Origin chain {} missing from networks config", origin_chain_id)))?;
+	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0).map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Output settler = OUTPUT settler on destination chain
-	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| {
-		QuoteError::InvalidRequest(format!(
-			"Destination chain {} missing from networks config",
-			dest_chain_id
-		))
-	})?;
-	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| QuoteError::InvalidRequest(format!("Destination chain {} missing from networks config", dest_chain_id)))?;
+	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0).map_err(|e| QuoteError::InvalidRequest(e))?;
 
-	// Permit2 verifying contract address for origin chain (STRICTLY from config; no fallback)
+	// Permit2 verifying contract address for origin chain
 	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
 
-	// Oracle address (per origin chain) from settlement implementation config.
-	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+	// Oracle address (per origin chain)
+	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id).map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Nonce and deadlines
 	let now_secs = chrono::Utc::now().timestamp() as u64;
@@ -88,25 +52,13 @@ pub fn build_permit2_batch_witness_digest(
 	let deadline_secs: U256 = U256::from(now_secs + 300);
 	let expires_u32: u32 = (now_secs + 300) as u32;
 
-	// Type strings defined in shared utils
-
 	// Type hashes
 	let domain_type_hash = keccak256(DOMAIN_TYPE.as_bytes());
 	let name_hash = keccak256(NAME_PERMIT2.as_bytes());
 	let mandate_output_type_hash = keccak256(MANDATE_OUTPUT_TYPE.as_bytes());
-	let permit2_witness_type_hash =
-		keccak256(format!("{}{}", PERMIT2_WITNESS_TYPE, MANDATE_OUTPUT_TYPE).as_bytes());
+	let permit2_witness_type_hash = keccak256(format!("{}{}", PERMIT2_WITNESS_TYPE, MANDATE_OUTPUT_TYPE).as_bytes());
 	let token_permissions_type_hash = keccak256(TOKEN_PERMISSIONS_TYPE.as_bytes());
-	let permit_batch_witness_type_hash = keccak256(
-		format!(
-			"{}{}{}{}",
-			PERMIT_BATCH_WITNESS_TYPE,
-			MANDATE_OUTPUT_TYPE,
-			TOKEN_PERMISSIONS_TYPE,
-			PERMIT2_WITNESS_TYPE
-		)
-		.as_bytes(),
-	);
+	let permit_batch_witness_type_hash = keccak256(format!("{}{}{}{}", PERMIT_BATCH_WITNESS_TYPE, MANDATE_OUTPUT_TYPE, TOKEN_PERMISSIONS_TYPE, PERMIT2_WITNESS_TYPE).as_bytes());
 
 	let empty_bytes_hash = keccak256(&[]);
 
@@ -162,9 +114,8 @@ pub fn build_permit2_batch_witness_digest(
 
 	let final_digest = compute_final_digest(&domain_separator_hash, &main_struct_hash);
 
-	// Message JSON
 	let message_json = json!({
-		"digest": with_0x_prefix(&hex::encode(final_digest)),
+		"digest": final_digest,
 		"signing": {
 			"scheme": "eip-712",
 			"noPrefix": true,
@@ -198,18 +149,7 @@ pub fn build_permit2_batch_witness_digest(
 		}
 	});
 
-	Ok((with_0x_prefix(&hex::encode(final_digest)), message_json))
-}
-
-/// Resolve the Permit2 address for a given chain strictly from config.
-/// Looks under `settlement.implementations.eip7683.permit2_addresses`.
-pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, QuoteError> {
-	// Use default Permit2 address mapping from CustodyStrategy
-	use super::custody::CustodyStrategy;
-	let map = CustodyStrategy::default_permit2_addresses();
-	map.get(&chain_id).copied().ok_or_else(|| {
-		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
-	})
+	Ok((final_digest, message_json))
 }
 
 /// Build an ERC-7930 interop address for Permit2 domain (no name/version carried here).
@@ -220,3 +160,13 @@ pub fn permit2_domain_address_from_config(
 	let permit2 = resolve_permit2_address(config, chain_id)?;
 	Ok(InteropAddress::new_ethereum(chain_id, permit2))
 }
+
+/// Resolve the Permit2 address for a given chain using default map.
+pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, QuoteError> {
+	// Reuse default addresses from custody strategy
+	let map = crate::quote::custody_strategy::CustodyStrategy::default_permit2_addresses();
+	map.get(&chain_id).copied().ok_or_else(|| {
+		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
+	})
+}
+

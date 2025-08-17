@@ -3,8 +3,6 @@
 //! This module contains the core business logic for quote processing,
 //! separated from the HTTP API layer for better maintainability and testing.
 
-pub mod custody;
-pub mod eip712;
 pub mod generation;
 pub mod validation;
 
