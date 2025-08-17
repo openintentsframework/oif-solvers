@@ -5,7 +5,9 @@
 //! for various order standards.
 
 use async_trait::async_trait;
+use solver_config::Config;
 use solver_types::{ConfigSchema, FillProof, Order, TransactionHash};
+use alloy_primitives::Address as AlloyAddress;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -105,4 +107,29 @@ impl SettlementService {
 			false
 		}
 	}
+}
+
+/// Resolve the oracle address for a given chain from settlement implementation config.
+///
+/// This is a generic helper that lives in settlement layer and can be reused
+/// by any consumer needing the configured oracle address. It expects the
+/// settlement implementation name `eip7683` and looks up
+/// `settlement.implementations.eip7683.oracle_addresses` in the provided `Config`.
+pub fn resolve_oracle_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, String> {
+    let Some(impl_val) = config.settlement.implementations.get("eip7683") else {
+        return Err("Missing settlement.implementations.eip7683 in config".to_string());
+    };
+    let Some(table) = impl_val.as_table() else {
+        return Err("Invalid eip7683 settlement implementation format".to_string());
+    };
+    let Some(oracle_map) = table.get("oracle_addresses").and_then(|v| v.as_table()) else {
+        return Err("Missing oracle_addresses in eip7683 settlement implementation".to_string());
+    };
+    let key = chain_id.to_string();
+    let Some(addr_str) = oracle_map.get(&key).and_then(|v| v.as_str()) else {
+        return Err(format!("Oracle address not configured for chain {}", chain_id));
+    };
+    addr_str
+        .parse::<AlloyAddress>()
+        .map_err(|e| format!("Invalid oracle address: {}", e))
 }

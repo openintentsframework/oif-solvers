@@ -11,6 +11,7 @@ alloy-sol-types = "0.8"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 solver-types = { path = "../solver-types" }
+solver-config = { path = "../solver-config" }
 thiserror = "1.0"
 serde_json = "1.0"
 toml = { workspace = true }

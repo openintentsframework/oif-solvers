@@ -7,7 +7,15 @@
 
 use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
 
-const DOMAIN_TYPE: &str = "EIP712Domain(string name,uint256 chainId,address verifyingContract)";
+// Common EIP-712 type strings used across the solver
+pub const DOMAIN_TYPE: &str = "EIP712Domain(string name,uint256 chainId,address verifyingContract)";
+pub const NAME_PERMIT2: &str = "Permit2";
+pub const MANDATE_OUTPUT_TYPE: &str = "MandateOutput(bytes32 oracle,bytes32 settler,uint256 chainId,bytes32 token,uint256 amount,bytes32 recipient,bytes call,bytes context)";
+pub const PERMIT2_WITNESS_TYPE: &str =
+	"Permit2Witness(uint32 expires,address inputOracle,MandateOutput[] outputs)";
+pub const TOKEN_PERMISSIONS_TYPE: &str = "TokenPermissions(address token,uint256 amount)";
+pub const PERMIT_BATCH_WITNESS_TYPE: &str =
+	"PermitBatchWitnessTransferFrom(TokenPermissions[] permitted,address spender,uint256 nonce,uint256 deadline,Permit2Witness witness)";
 
 /// Compute EIP-712 domain hash (keccak256(abi.encode(typeHash, nameHash, chainId, verifyingContract))).
 pub fn compute_domain_hash(name: &str, chain_id: u64, verifying_contract: &AlloyAddress) -> B256 {

@@ -4,7 +4,7 @@
 //! data formats commonly used in the solver system.
 
 use super::formatting::without_0x_prefix;
-use alloy_primitives::hex;
+use alloy_primitives::{hex, Address as AlloyAddress};
 
 /// Converts a bytes32 value to an Ethereum address string without "0x" prefix.
 ///
@@ -31,6 +31,18 @@ pub fn bytes32_to_address(bytes32: &[u8; 32]) -> String {
 
 	// Ensure the result never has "0x" prefix
 	without_0x_prefix(&address).to_string()
+}
+
+/// Converts a 20-byte slice to an Alloy `Address`.
+///
+/// Returns an error string if the slice is not exactly 20 bytes.
+pub fn bytes20_to_alloy_address(bytes: &[u8]) -> Result<AlloyAddress, String> {
+    if bytes.len() != 20 {
+        return Err(format!("Expected 20-byte address, got {}", bytes.len()));
+    }
+    let mut arr = [0u8; 20];
+    arr.copy_from_slice(bytes);
+    Ok(AlloyAddress::from(arr))
 }
 
 #[cfg(test)]

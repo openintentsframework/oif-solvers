@@ -2,12 +2,23 @@
 //! Uses generic EIP-712 utilities from `solver-types`.
 
 use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
+use alloy_primitives::hex;
 use serde_json::json;
 use solver_config::Config;
 use solver_types::{
-	utils::{compute_final_digest, Eip712AbiEncoder},
-	GetQuoteRequest, InteropAddress, QuoteError,
+	utils::{compute_final_digest, Eip712AbiEncoder}, with_0x_prefix, GetQuoteRequest, InteropAddress, QuoteError
 };
+
+use solver_types::utils::{
+	DOMAIN_TYPE,
+	MANDATE_OUTPUT_TYPE,
+	NAME_PERMIT2,
+	PERMIT2_WITNESS_TYPE,
+	PERMIT_BATCH_WITNESS_TYPE,
+	TOKEN_PERMISSIONS_TYPE,
+};
+use solver_types::utils::bytes20_to_alloy_address;
+use solver_settlement::resolve_oracle_address as settlement_resolve_oracle_address;
 
 /// Computes the EIP-712 final digest for Permit2's
 /// `PermitBatchWitnessTransferFrom` with a single permitted token and single output.
@@ -51,7 +62,8 @@ pub fn build_permit2_batch_witness_digest(
 			origin_chain_id
 		))
 	})?;
-	let spender = bytes20_to_address(&origin_net.input_settler_address.0)?;
+	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Output settler = OUTPUT settler on destination chain
 	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| {
@@ -60,13 +72,15 @@ pub fn build_permit2_batch_witness_digest(
 			dest_chain_id
 		))
 	})?;
-	let output_settler = bytes20_to_address(&dest_net.output_settler_address.0)?;
+	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Permit2 verifying contract address for origin chain (STRICTLY from config; no fallback)
 	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
 
 	// Oracle address (per origin chain) from settlement implementation config.
-	let input_oracle = resolve_oracle_address(config, origin_chain_id)?;
+	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Nonce and deadlines
 	let now_secs = chrono::Utc::now().timestamp() as u64;
@@ -74,15 +88,7 @@ pub fn build_permit2_batch_witness_digest(
 	let deadline_secs: U256 = U256::from(now_secs + 300);
 	let expires_u32: u32 = (now_secs + 300) as u32;
 
-	// Type strings
-	const DOMAIN_TYPE: &str = "EIP712Domain(string name,uint256 chainId,address verifyingContract)";
-	const NAME_PERMIT2: &str = "Permit2";
-	const MANDATE_OUTPUT_TYPE: &str = "MandateOutput(bytes32 oracle,bytes32 settler,uint256 chainId,bytes32 token,uint256 amount,bytes32 recipient,bytes call,bytes context)";
-	const PERMIT2_WITNESS_TYPE: &str =
-		"Permit2Witness(uint32 expires,address inputOracle,MandateOutput[] outputs)";
-	const TOKEN_PERMISSIONS_TYPE: &str = "TokenPermissions(address token,uint256 amount)";
-	const PERMIT_BATCH_WITNESS_TYPE: &str =
-        "PermitBatchWitnessTransferFrom(TokenPermissions[] permitted,address spender,uint256 nonce,uint256 deadline,Permit2Witness witness)";
+	// Type strings defined in shared utils
 
 	// Type hashes
 	let domain_type_hash = keccak256(DOMAIN_TYPE.as_bytes());
@@ -158,7 +164,7 @@ pub fn build_permit2_batch_witness_digest(
 
 	// Message JSON
 	let message_json = json!({
-		"digest": format_hex(&final_digest),
+		"digest": with_0x_prefix(&hex::encode(final_digest)),
 		"signing": {
 			"scheme": "eip-712",
 			"noPrefix": true,
@@ -192,36 +198,7 @@ pub fn build_permit2_batch_witness_digest(
 		}
 	});
 
-	Ok((format_hex(&final_digest), message_json))
-}
-
-/// Resolve the oracle address for a given chain from settlement implementation config.
-fn resolve_oracle_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, QuoteError> {
-	let Some(impl_val) = config.settlement.implementations.get("eip7683") else {
-		return Err(QuoteError::InvalidRequest(
-			"Missing settlement.implementations.eip7683 in config".to_string(),
-		));
-	};
-	let Some(table) = impl_val.as_table() else {
-		return Err(QuoteError::InvalidRequest(
-			"Invalid eip7683 settlement implementation format".to_string(),
-		));
-	};
-	let Some(oracle_map) = table.get("oracle_addresses").and_then(|v| v.as_table()) else {
-		return Err(QuoteError::InvalidRequest(
-			"Missing oracle_addresses in eip7683 settlement implementation".to_string(),
-		));
-	};
-	let key = chain_id.to_string();
-	let Some(addr_str) = oracle_map.get(&key).and_then(|v| v.as_str()) else {
-		return Err(QuoteError::InvalidRequest(format!(
-			"Oracle address not configured for chain {}",
-			chain_id
-		)));
-	};
-	addr_str
-		.parse::<AlloyAddress>()
-		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid oracle address: {}", e)))
+	Ok((with_0x_prefix(&hex::encode(final_digest)), message_json))
 }
 
 /// Resolve the Permit2 address for a given chain strictly from config.
@@ -233,22 +210,6 @@ pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAd
 	map.get(&chain_id).copied().ok_or_else(|| {
 		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
 	})
-}
-
-fn bytes20_to_address(bytes: &[u8]) -> Result<AlloyAddress, QuoteError> {
-	if bytes.len() != 20 {
-		return Err(QuoteError::InvalidRequest(format!(
-			"Expected 20-byte address, got {}",
-			bytes.len()
-		)));
-	}
-	let mut arr = [0u8; 20];
-	arr.copy_from_slice(bytes);
-	Ok(AlloyAddress::from(arr))
-}
-
-fn format_hex(b: &B256) -> String {
-	format!("0x{:x}", b)
 }
 
 /// Build an ERC-7930 interop address for Permit2 domain (no name/version carried here).
