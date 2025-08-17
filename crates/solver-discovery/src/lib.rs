@@ -64,6 +64,18 @@ pub trait DiscoveryInterface: Send + Sync {
 	/// This method should cleanly shut down any active monitoring tasks
 	/// and release associated resources.
 	async fn stop_monitoring(&self) -> Result<(), DiscoveryError>;
+
+	/// Returns the URL for external API access if this discovery implementation provides one.
+	///
+	/// This is primarily used by offchain discovery implementations that expose
+	/// an HTTP API for intent submission. Most implementations will return None.
+	///
+	/// # Returns
+	/// * `Some(String)` - The URL for the discovery service API
+	/// * `None` - If this implementation doesn't provide an external API
+	fn get_url(&self) -> Option<String> {
+		None
+	}
 }
 
 /// Service that manages multiple intent discovery sources.
@@ -72,7 +84,7 @@ pub trait DiscoveryInterface: Send + Sync {
 /// the solver to find intents from various channels simultaneously.
 pub struct DiscoveryService {
 	/// Collection of discovery sources to monitor.
-	sources: Vec<Box<dyn DiscoveryInterface>>,
+	pub sources: Vec<Box<dyn DiscoveryInterface>>,
 }
 
 impl DiscoveryService {

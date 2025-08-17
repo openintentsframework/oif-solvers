@@ -6,14 +6,14 @@
 //! complex attestation mechanisms.
 
 use crate::{SettlementError, SettlementInterface};
-use alloy_primitives::{Address as AlloyAddress, FixedBytes};
+use alloy_primitives::{hex, Address as AlloyAddress, FixedBytes};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	ConfigSchema, Eip7683OrderData, Field, FieldType, FillProof, NetworksConfig, Order, Schema,
-	TransactionHash,
+	without_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, FillProof, NetworksConfig,
+	Order, Schema, TransactionHash,
 };
 use std::collections::HashMap;
 
@@ -154,6 +154,27 @@ impl ConfigSchema for DirectSettlementSchema {
 impl SettlementInterface for DirectSettlement {
 	fn config_schema(&self) -> Box<dyn ConfigSchema> {
 		Box::new(DirectSettlementSchema)
+	}
+
+	/// Returns the oracle address configured for a specific chain.
+	///
+	/// This implementation stores oracle addresses per chain in its configuration.
+	/// The addresses are stored as hex strings and converted to the Address type on demand.
+	///
+	/// # Arguments
+	/// * `chain_id` - The chain ID to get the oracle address for
+	///
+	/// # Returns
+	/// * `Some(Address)` if an oracle is configured for this chain and the address is valid
+	/// * `None` if no oracle is configured or the address format is invalid
+	fn get_oracle_address(&self, chain_id: u64) -> Option<solver_types::Address> {
+		self.oracle_addresses.get(&chain_id).and_then(|addr_str| {
+			let hex_str = without_0x_prefix(addr_str);
+			hex::decode(hex_str)
+				.ok()
+				.filter(|bytes| bytes.len() == 20)
+				.map(solver_types::Address)
+		})
 	}
 
 	/// Gets attestation data for a filled order and generates a fill proof.

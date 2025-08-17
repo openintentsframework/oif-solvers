@@ -166,6 +166,23 @@ pub struct SettlementConfig {
 	pub domain: Option<DomainConfig>,
 }
 
+/// Implementation references for API functionality.
+///
+/// Specifies which implementations to use for various API features.
+/// These must match the names of configured implementations in their respective sections.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ApiImplementations {
+	/// Settlement implementation to use for quote generation.
+	/// Must match one of the configured implementations in [settlement.implementations].
+	/// Used by the /quotes endpoint to determine oracle addresses and settlement parameters.
+	pub settlement: String,
+	/// Discovery implementation to use for order forwarding.
+	/// Must match one of the configured implementations in [discovery.implementations].
+	/// Used by the /orders endpoint to forward intent submissions to the discovery service.
+	/// If not specified, order forwarding will be disabled.
+	pub discovery: Option<String>,
+}
+
 /// Configuration for the HTTP API server.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiConfig {
@@ -184,6 +201,9 @@ pub struct ApiConfig {
 	/// Maximum request size in bytes.
 	#[serde(default = "default_max_request_size")]
 	pub max_request_size: usize,
+	/// Implementation references for API functionality.
+	#[serde(default)]
+	pub implementations: ApiImplementations,
 	/// Rate limiting configuration.
 	pub rate_limiting: Option<RateLimitConfig>,
 	/// CORS configuration.
@@ -452,6 +472,33 @@ impl Config {
 			return Err(ConfigError::Validation(
 				"At least one settlement implementation required".into(),
 			));
+		}
+
+		// Validate API config if enabled
+		if let Some(ref api) = self.api {
+			if api.enabled {
+				// Validate settlement implementation exists
+				if !self
+					.settlement
+					.implementations
+					.contains_key(&api.implementations.settlement)
+				{
+					return Err(ConfigError::Validation(format!(
+						"API settlement implementation '{}' not found in settlement.implementations",
+						api.implementations.settlement
+					)));
+				}
+
+				// Validate discovery implementation exists if specified
+				if let Some(ref discovery) = api.implementations.discovery {
+					if !self.discovery.sources.contains_key(discovery) {
+						return Err(ConfigError::Validation(format!(
+							"API discovery implementation '{}' not found in discovery.implementations",
+							discovery
+						)));
+					}
+				}
+			}
 		}
 
 		Ok(())
