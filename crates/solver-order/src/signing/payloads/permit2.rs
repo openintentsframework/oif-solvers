@@ -4,47 +4,73 @@ use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
 use serde_json::json;
 use solver_config::Config;
 use solver_settlement::resolve_oracle_address as settlement_resolve_oracle_address;
-use solver_types::{
-	utils::{compute_final_digest, Eip712AbiEncoder}, GetQuoteRequest, InteropAddress, QuoteError,
-};
-use solver_types::utils::{
-	DOMAIN_TYPE, MANDATE_OUTPUT_TYPE, NAME_PERMIT2, PERMIT2_WITNESS_TYPE, PERMIT_BATCH_WITNESS_TYPE,
-	TOKEN_PERMISSIONS_TYPE,
-};
 use solver_types::utils::bytes20_to_alloy_address;
+use solver_types::utils::{
+	DOMAIN_TYPE, MANDATE_OUTPUT_TYPE, NAME_PERMIT2, PERMIT2_WITNESS_TYPE,
+	PERMIT_BATCH_WITNESS_TYPE, TOKEN_PERMISSIONS_TYPE,
+};
+use solver_types::{
+	utils::{compute_final_digest, Eip712AbiEncoder},
+	GetQuoteRequest, InteropAddress, QuoteError,
+};
 
 pub fn build_permit2_batch_witness_digest(
 	request: &GetQuoteRequest,
 	config: &Config,
 ) -> Result<(B256, serde_json::Value), QuoteError> {
 	let input = &request.available_inputs[0];
-	let output = &request
-		.requested_outputs
-		.get(0)
-		.ok_or_else(|| QuoteError::InvalidRequest("At least one requested output is required".to_string()))?;
+	let output = &request.requested_outputs.get(0).ok_or_else(|| {
+		QuoteError::InvalidRequest("At least one requested output is required".to_string())
+	})?;
 
-	let origin_chain_id = input.asset.ethereum_chain_id().map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin chain ID in asset address: {}", e)))?;
-	let dest_chain_id = output.asset.ethereum_chain_id().map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination chain ID: {}", e)))?;
+	let origin_chain_id = input.asset.ethereum_chain_id().map_err(|e| {
+		QuoteError::InvalidRequest(format!("Invalid origin chain ID in asset address: {}", e))
+	})?;
+	let dest_chain_id = output
+		.asset
+		.ethereum_chain_id()
+		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination chain ID: {}", e)))?;
 
-	let origin_token = input.asset.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin token address: {}", e)))?;
-	let dest_token = output.asset.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid destination token address: {}", e)))?;
-	let recipient = output.receiver.ethereum_address().map_err(|e| QuoteError::InvalidRequest(format!("Invalid recipient address: {}", e)))?;
+	let origin_token = input
+		.asset
+		.ethereum_address()
+		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid origin token address: {}", e)))?;
+	let dest_token = output.asset.ethereum_address().map_err(|e| {
+		QuoteError::InvalidRequest(format!("Invalid destination token address: {}", e))
+	})?;
+	let recipient = output
+		.receiver
+		.ethereum_address()
+		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid recipient address: {}", e)))?;
 
 	let amount: U256 = input.amount;
 
 	// Spender = INPUT settler on origin chain
-	let origin_net = config.networks.get(&origin_chain_id).ok_or_else(|| QuoteError::InvalidRequest(format!("Origin chain {} missing from networks config", origin_chain_id)))?;
-	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0).map_err(|e| QuoteError::InvalidRequest(e))?;
+	let origin_net = config.networks.get(&origin_chain_id).ok_or_else(|| {
+		QuoteError::InvalidRequest(format!(
+			"Origin chain {} missing from networks config",
+			origin_chain_id
+		))
+	})?;
+	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Output settler = OUTPUT settler on destination chain
-	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| QuoteError::InvalidRequest(format!("Destination chain {} missing from networks config", dest_chain_id)))?;
-	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0).map_err(|e| QuoteError::InvalidRequest(e))?;
+	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| {
+		QuoteError::InvalidRequest(format!(
+			"Destination chain {} missing from networks config",
+			dest_chain_id
+		))
+	})?;
+	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Permit2 verifying contract address for origin chain
 	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
 
 	// Oracle address (per origin chain)
-	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id).map_err(|e| QuoteError::InvalidRequest(e))?;
+	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id)
+		.map_err(|e| QuoteError::InvalidRequest(e))?;
 
 	// Nonce and deadlines
 	let now_secs = chrono::Utc::now().timestamp() as u64;
@@ -56,9 +82,19 @@ pub fn build_permit2_batch_witness_digest(
 	let domain_type_hash = keccak256(DOMAIN_TYPE.as_bytes());
 	let name_hash = keccak256(NAME_PERMIT2.as_bytes());
 	let mandate_output_type_hash = keccak256(MANDATE_OUTPUT_TYPE.as_bytes());
-	let permit2_witness_type_hash = keccak256(format!("{}{}", PERMIT2_WITNESS_TYPE, MANDATE_OUTPUT_TYPE).as_bytes());
+	let permit2_witness_type_hash =
+		keccak256(format!("{}{}", PERMIT2_WITNESS_TYPE, MANDATE_OUTPUT_TYPE).as_bytes());
 	let token_permissions_type_hash = keccak256(TOKEN_PERMISSIONS_TYPE.as_bytes());
-	let permit_batch_witness_type_hash = keccak256(format!("{}{}{}{}", PERMIT_BATCH_WITNESS_TYPE, MANDATE_OUTPUT_TYPE, TOKEN_PERMISSIONS_TYPE, PERMIT2_WITNESS_TYPE).as_bytes());
+	let permit_batch_witness_type_hash = keccak256(
+		format!(
+			"{}{}{}{}",
+			PERMIT_BATCH_WITNESS_TYPE,
+			MANDATE_OUTPUT_TYPE,
+			TOKEN_PERMISSIONS_TYPE,
+			PERMIT2_WITNESS_TYPE
+		)
+		.as_bytes(),
+	);
 
 	let empty_bytes_hash = keccak256(&[]);
 
@@ -169,4 +205,3 @@ pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAd
 		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
 	})
 }
-

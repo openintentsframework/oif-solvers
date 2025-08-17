@@ -15,7 +15,9 @@ pub struct QuoteGenerator {
 impl QuoteGenerator {
 	/// Create new quote generator
 	pub fn new() -> Self {
-		Self { core: CoreQuoteGenerator::new() }
+		Self {
+			core: CoreQuoteGenerator::new(),
+		}
 	}
 
 	/// Generate quotes for the given request
