@@ -182,11 +182,7 @@ impl Eip7683Discovery {
 			input_oracle: with_0x_prefix(&hex::encode(order.inputOracle)),
 			inputs: order.inputs.clone(),
 			order_id: order_id.0,
-			gas_limit_overrides: GasLimitOverrides {
-				settle_gas_limit: None,
-				fill_gas_limit: None,
-				prepare_gas_limit: None,
-			},
+			gas_limit_overrides: GasLimitOverrides::default(),
 			outputs: order
 				.outputs
 				.iter()

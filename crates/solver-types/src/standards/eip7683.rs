@@ -8,7 +8,7 @@ use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// Gas limit overrides for various transaction types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct GasLimitOverrides {
 	/// Gas limit for settlement transaction
 	#[serde(skip_serializing_if = "Option::is_none")]
