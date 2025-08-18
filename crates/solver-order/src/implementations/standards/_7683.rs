@@ -197,6 +197,14 @@ impl OrderInterface for Eip7683OrderImpl {
 			return Err(OrderError::ValidationFailed("Order expired".to_string()));
 		}
 
+		// Extract chain IDs for the order
+		let input_chain_ids = vec![order_data.origin_chain_id.to::<u64>()];
+		let output_chain_ids = order_data
+			.outputs
+			.iter()
+			.map(|output| output.chain_id.to::<u64>())
+			.collect::<Vec<_>>();
+
 		// Create order
 		Ok(Order {
 			id: intent.id.clone(),
@@ -206,6 +214,8 @@ impl OrderInterface for Eip7683OrderImpl {
 				.map_err(|e| OrderError::ValidationFailed(format!("Failed to serialize: {}", e)))?,
 			solver_address: solver_address.clone(),
 			quote_id: intent.quote_id.clone(),
+			input_chain_ids,
+			output_chain_ids,
 			updated_at: std::time::SystemTime::now()
 				.duration_since(std::time::UNIX_EPOCH)
 				.map(|d| d.as_secs())

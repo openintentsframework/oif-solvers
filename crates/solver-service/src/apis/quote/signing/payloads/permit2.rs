@@ -1,12 +1,30 @@
-//! Permit2 EIP-712 payload builder (moved from solver-service)
+//! Permit2 signature payload generation for cross-chain token transfers.
+//!
+//! This module implements the EIP-712 structured data signing for Uniswap's Permit2 protocol,
+//! enabling gasless and secure token transfers across chains. It generates the necessary
+//! cryptographic digests and message payloads that users sign to authorize token movements.
+//!
+//! ## Overview
+//!
+//! Permit2 is a token approval contract that enables:
+//! - Signature-based approvals instead of on-chain transactions
+//! - Batch token transfers with a single signature
+//! - Witness data for additional validation logic
+//! - Cross-chain intent execution through oracle verification
+//!
+//! ## Key Components
+//!
+//! - **Batch Witness Digest**: Combines token permissions with cross-chain output specifications
+//! - **Domain Separation**: EIP-712 domain binding to prevent signature replay attacks
+//! - **Oracle Integration**: Embeds oracle addresses for settlement verification
 
-use alloy_primitives::{keccak256, Address as AlloyAddress, B256, U256};
+use crate::apis::quote::registry::PROTOCOL_REGISTRY;
+use alloy_primitives::{keccak256, B256, U256};
 use serde_json::json;
 use solver_config::Config;
-use solver_settlement::resolve_oracle_address as settlement_resolve_oracle_address;
-use solver_types::utils::bytes20_to_alloy_address;
+use solver_settlement::SettlementInterface;
 use solver_types::utils::{
-	DOMAIN_TYPE, MANDATE_OUTPUT_TYPE, NAME_PERMIT2, PERMIT2_WITNESS_TYPE,
+	bytes20_to_alloy_address, DOMAIN_TYPE, MANDATE_OUTPUT_TYPE, NAME_PERMIT2, PERMIT2_WITNESS_TYPE,
 	PERMIT_BATCH_WITNESS_TYPE, TOKEN_PERMISSIONS_TYPE,
 };
 use solver_types::{
@@ -17,9 +35,11 @@ use solver_types::{
 pub fn build_permit2_batch_witness_digest(
 	request: &GetQuoteRequest,
 	config: &Config,
+	settlement: &dyn SettlementInterface,
 ) -> Result<(B256, serde_json::Value), QuoteError> {
+	// TODO: Implement support for multi-input/outputs
 	let input = &request.available_inputs[0];
-	let output = &request.requested_outputs.get(0).ok_or_else(|| {
+	let output = &request.requested_outputs.first().ok_or_else(|| {
 		QuoteError::InvalidRequest("At least one requested output is required".to_string())
 	})?;
 
@@ -53,7 +73,7 @@ pub fn build_permit2_batch_witness_digest(
 		))
 	})?;
 	let spender = bytes20_to_alloy_address(&origin_net.input_settler_address.0)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+		.map_err(QuoteError::InvalidRequest)?;
 
 	// Output settler = OUTPUT settler on destination chain
 	let dest_net = config.networks.get(&dest_chain_id).ok_or_else(|| {
@@ -63,14 +83,26 @@ pub fn build_permit2_batch_witness_digest(
 		))
 	})?;
 	let output_settler = bytes20_to_alloy_address(&dest_net.output_settler_address.0)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+		.map_err(QuoteError::InvalidRequest)?;
 
 	// Permit2 verifying contract address for origin chain
-	let permit2 = resolve_permit2_address(config, origin_chain_id)?;
+	let permit2 = PROTOCOL_REGISTRY
+		.get_permit2_address(origin_chain_id)
+		.ok_or_else(|| {
+			QuoteError::InvalidRequest(format!("Permit2 not deployed on chain {}", origin_chain_id))
+		})?;
 
-	// Oracle address (per origin chain)
-	let input_oracle = settlement_resolve_oracle_address(config, origin_chain_id)
-		.map_err(|e| QuoteError::InvalidRequest(e))?;
+	// Oracle address (per origin chain) from the settlement implementation
+	let input_oracle = settlement
+		.get_oracle_address(origin_chain_id)
+		.ok_or_else(|| {
+			QuoteError::InvalidRequest(format!(
+				"No oracle configured for chain {}",
+				origin_chain_id
+			))
+		})?;
+	let input_oracle = bytes20_to_alloy_address(&input_oracle.0)
+		.map_err(|e| QuoteError::InvalidRequest(format!("Invalid oracle address: {}", e)))?;
 
 	// Nonce and deadlines
 	let now_secs = chrono::Utc::now().timestamp() as u64;
@@ -96,7 +128,7 @@ pub fn build_permit2_batch_witness_digest(
 		.as_bytes(),
 	);
 
-	let empty_bytes_hash = keccak256(&[]);
+	let empty_bytes_hash = keccak256([]);
 
 	// MandateOutput hash
 	let mut enc = Eip712AbiEncoder::new();
@@ -190,18 +222,13 @@ pub fn build_permit2_batch_witness_digest(
 
 /// Build an ERC-7930 interop address for Permit2 domain (no name/version carried here).
 pub fn permit2_domain_address_from_config(
-	config: &Config,
+	_config: &Config,
 	chain_id: u64,
 ) -> Result<InteropAddress, QuoteError> {
-	let permit2 = resolve_permit2_address(config, chain_id)?;
+	let permit2 = PROTOCOL_REGISTRY
+		.get_permit2_address(chain_id)
+		.ok_or_else(|| {
+			QuoteError::InvalidRequest(format!("Permit2 not deployed on chain {}", chain_id))
+		})?;
 	Ok(InteropAddress::new_ethereum(chain_id, permit2))
-}
-
-/// Resolve the Permit2 address for a given chain using default map.
-pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAddress, QuoteError> {
-	// Reuse default addresses from custody strategy
-	let map = crate::quote::custody_strategy::CustodyStrategy::default_permit2_addresses();
-	map.get(&chain_id).copied().ok_or_else(|| {
-		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
-	})
 }

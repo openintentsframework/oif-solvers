@@ -32,6 +32,14 @@ pub struct Order {
 	/// Quote ID associated with this order.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub quote_id: Option<String>,
+	/// Chain IDs where input assets are located.
+	/// For most orders this will be a single chain, but could be multiple for complex orders.
+	#[serde(default)]
+	pub input_chain_ids: Vec<u64>,
+	/// Chain IDs where output assets will be delivered.
+	/// Can be multiple chains for orders that split outputs across chains.
+	#[serde(default)]
+	pub output_chain_ids: Vec<u64>,
 	/// Execution parameters when order is ready for execution.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub execution_params: Option<ExecutionParams>,

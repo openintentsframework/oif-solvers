@@ -31,8 +31,8 @@ DEST_CHAIN_ID=31338
 USER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user = ' | head -1 | cut -d'"' -f2)
 RECIPIENT_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'recipient = ' | head -1 | cut -d'"' -f2)
 
-TOKENA_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
-TOKENA_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
+TOKENA_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
+TOKENA_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
 
 # Build ERC-7930 interop addresses (UII) for demo chains
 to_uii() {
@@ -85,5 +85,5 @@ echo "$QUOTE_RESP" > "$TMP_QUOTE_JSON"
 echo -e "${YELLOW}✍️  Signing and submitting intent via build_transaction.sh...${NC}"
 scripts/demo/build_transaction.sh "$TMP_QUOTE_JSON" "$ORDERS_ENDPOINT"
 
-echo -e "${GREEN}🎉 Flow complete${NC}"
+echo -e "${GREEN}🎉 Intent Submitted${NC}"
 

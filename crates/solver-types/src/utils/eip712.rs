@@ -44,6 +44,12 @@ pub struct Eip712AbiEncoder {
 	buf: Vec<u8>,
 }
 
+impl Default for Eip712AbiEncoder {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl Eip712AbiEncoder {
 	pub fn new() -> Self {
 		Self { buf: Vec::new() }
