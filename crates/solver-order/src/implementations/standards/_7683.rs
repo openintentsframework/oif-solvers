@@ -197,7 +197,7 @@ impl OrderInterface for Eip7683OrderImpl {
 			return Err(OrderError::ValidationFailed("Order expired".to_string()));
 		}
 
-		// Extract chain IDs for the order
+		// Extract chain IDs
 		let input_chain_ids = vec![order_data.origin_chain_id.to::<u64>()];
 		let output_chain_ids = order_data
 			.outputs
@@ -300,7 +300,10 @@ impl OrderInterface for Eip7683OrderImpl {
 		.abi_encode();
 
 		// Get the input settler address for the order's origin chain
-		let origin_chain_id = order_data.origin_chain_id.to::<u64>();
+		let origin_chain_id = *order
+			.input_chain_ids
+			.first()
+			.ok_or_else(|| OrderError::ValidationFailed("No input chains in order".into()))?;
 		let input_settler_address = self
 			.networks
 			.get(&origin_chain_id)
@@ -317,9 +320,9 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(input_settler_address),
 			data: open_for_data,
 			value: U256::ZERO,
-			chain_id: order_data.origin_chain_id.to::<u64>(),
+			chain_id: origin_chain_id,
 			nonce: None,
-			gas_limit: Some(300_000), // TODO: Determine gas limit here
+			gas_limit: order_data.gas_limit_overrides.prepare_gas_limit,
 			gas_price: None,
 			max_fee_per_gas: None,
 			max_priority_fee_per_gas: None,
@@ -368,17 +371,15 @@ impl OrderInterface for Eip7683OrderImpl {
 				OrderError::ValidationFailed("No cross-chain output found".to_string())
 			})?;
 
-		let destination_chain_id = output.chain_id;
-
 		// Get the output settler address for the destination chain
-		let dest_chain_id = destination_chain_id.to::<u64>();
+		let dest_chain_id = output.chain_id.to::<u64>();
 		let output_settler_address = self
 			.networks
 			.get(&dest_chain_id)
 			.ok_or_else(|| {
 				OrderError::ValidationFailed(format!(
 					"Chain ID {} not found in networks configuration",
-					destination_chain_id
+					dest_chain_id
 				))
 			})?
 			.output_settler_address
@@ -417,9 +418,9 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(output_settler_address),
 			data: fill_data,
 			value: U256::ZERO,
-			chain_id: destination_chain_id.to::<u64>(),
+			chain_id: dest_chain_id,
 			nonce: None,
-			gas_limit: Some(order_data.fill_gas_limit),
+			gas_limit: order_data.gas_limit_overrides.fill_gas_limit,
 			gas_price: None,
 			max_fee_per_gas: None,
 			max_priority_fee_per_gas: None,
@@ -568,7 +569,10 @@ impl OrderInterface for Eip7683OrderImpl {
 		.abi_encode();
 
 		// Get the input settler address for the order's origin chain
-		let origin_chain_id = order_data.origin_chain_id.to::<u64>();
+		let origin_chain_id = *order
+			.input_chain_ids
+			.first()
+			.ok_or_else(|| OrderError::ValidationFailed("No input chains in order".into()))?;
 		let input_settler_address = self
 			.networks
 			.get(&origin_chain_id)
@@ -585,9 +589,9 @@ impl OrderInterface for Eip7683OrderImpl {
 			to: Some(input_settler_address),
 			data: call_data,
 			value: U256::ZERO,
-			chain_id: order_data.origin_chain_id.to::<u64>(),
+			chain_id: origin_chain_id,
 			nonce: None,
-			gas_limit: Some(order_data.settle_gas_limit),
+			gas_limit: order_data.gas_limit_overrides.settle_gas_limit,
 			gas_price: None,
 			max_fee_per_gas: None,
 			max_priority_fee_per_gas: None,

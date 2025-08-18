@@ -6,6 +6,7 @@
 use alloy_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::{Address, AssetAmount, ChainData, SettlementType, TransactionHash, TransactionType};
 
@@ -169,4 +170,17 @@ pub enum OrderStatus {
 	Finalized,
 	/// Order execution failed with specific transaction type.
 	Failed(TransactionType),
+}
+
+impl fmt::Display for OrderStatus {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			OrderStatus::Created => write!(f, "Created"),
+			OrderStatus::Pending => write!(f, "Pending"),
+			OrderStatus::Executed => write!(f, "Executed"),
+			OrderStatus::Settled => write!(f, "Settled"),
+			OrderStatus::Finalized => write!(f, "Finalized"),
+			OrderStatus::Failed(_) => write!(f, "Failed"),
+		}
+	}
 }
