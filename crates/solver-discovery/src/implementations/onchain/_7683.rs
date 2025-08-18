@@ -57,6 +57,9 @@ sol! {
 	event Open(bytes32 indexed orderId, bytes order);
 }
 
+const DEFAULT_POLLING_INTERVAL_SECS: u64 = 3;
+const MAX_POLLING_INTERVAL_SECS: u64 = 300;
+
 /// Provider types for different transport modes.
 enum ProviderType {
 	/// HTTP provider for polling mode.
@@ -107,7 +110,7 @@ impl Eip7683Discovery {
 			));
 		}
 
-		let interval = polling_interval_secs.unwrap_or(3);
+		let interval = polling_interval_secs.unwrap_or(DEFAULT_POLLING_INTERVAL_SECS);
 		let use_websocket = interval == 0;
 
 		// Create providers and get initial blocks for each network
@@ -481,8 +484,8 @@ impl ConfigSchema for Eip7683DiscoverySchema {
 			vec![Field::new(
 				"polling_interval_secs",
 				FieldType::Integer {
-					min: Some(0),   // 0 = WebSocket mode
-					max: Some(300), // Maximum 5 minutes
+					min: Some(0),                                // 0 = WebSocket mode
+					max: Some(MAX_POLLING_INTERVAL_SECS as i64), // Maximum 5 minutes
 				},
 			)],
 		);
