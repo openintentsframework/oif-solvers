@@ -488,6 +488,7 @@ network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
 
 [discovery.implementations.onchain_eip7683]
 network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
+polling_interval_secs = 0  # Use WebSocket subscriptions instead of polling
 
 [discovery.implementations.offchain_eip7683]
 api_host = "127.0.0.1"
@@ -516,7 +517,8 @@ max_gas_price_gwei = 100
 chain_id = 1
 address = "$INPUT_SETTLER"
 
-[settlement.implementations.eip7683]
+[settlement.implementations.direct]
+order = "eip7683"
 network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
 oracle_addresses = { $ORIGIN_CHAIN_ID = "$ORACLE", $DEST_CHAIN_ID = "$ORACLE" }
 dispute_period_seconds = 1
@@ -554,9 +556,13 @@ cat > config/demo/networks.toml << EOF
 # Defines all supported blockchain networks and their tokens
 
 [networks.$ORIGIN_CHAIN_ID]
-rpc_url = "http://localhost:$ORIGIN_PORT"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
+
+# RPC endpoints with both HTTP and WebSocket URLs for each network
+[[networks.$ORIGIN_CHAIN_ID.rpc_urls]]
+http = "http://localhost:$ORIGIN_PORT"
+ws = "ws://localhost:$ORIGIN_PORT"
 
 [[networks.$ORIGIN_CHAIN_ID.tokens]]
 address = "$TOKENA"
@@ -569,9 +575,13 @@ symbol = "TOKB"
 decimals = 18
 
 [networks.$DEST_CHAIN_ID]
-rpc_url = "http://localhost:$DEST_PORT"
 input_settler_address = "$INPUT_SETTLER"
 output_settler_address = "$OUTPUT_SETTLER"
+
+# RPC endpoints with both HTTP and WebSocket URLs for each network
+[[networks.$DEST_CHAIN_ID.rpc_urls]]
+http = "http://localhost:$DEST_PORT"
+ws = "ws://localhost:$DEST_PORT"
 
 [[networks.$DEST_CHAIN_ID.tokens]]
 address = "$TOKENA"
@@ -595,6 +605,9 @@ host = "127.0.0.1"
 port = 3000
 timeout_seconds = 30
 max_request_size = 1048576  # 1MB
+
+[api.implementations]
+discovery = "offchain_eip7683"
 EOF
 
 echo -e "  ${GREEN}✓${NC} Created modular config files:"
