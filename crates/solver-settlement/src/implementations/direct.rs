@@ -6,14 +6,14 @@
 //! complex attestation mechanisms.
 
 use crate::{SettlementError, SettlementInterface};
-use alloy_primitives::{Address as AlloyAddress, FixedBytes};
+use alloy_primitives::{hex, Address as AlloyAddress, FixedBytes};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_transport_http::Http;
 use async_trait::async_trait;
 use solver_types::{
-	ConfigSchema, Eip7683OrderData, Field, FieldType, FillProof, NetworksConfig, Order, Schema,
-	TransactionHash,
+	without_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, FillProof, NetworksConfig,
+	Order, Schema, TransactionHash,
 };
 use std::collections::HashMap;
 
@@ -22,6 +22,10 @@ use std::collections::HashMap;
 /// This implementation validates fills by checking transaction receipts
 /// and manages dispute periods before allowing claims.
 pub struct DirectSettlement {
+	/// The order type this implementation handles
+	order: String,
+	/// Supported network IDs
+	network_ids: Vec<u64>,
 	/// RPC providers for each supported network.
 	providers: HashMap<u64, RootProvider<Http<reqwest::Client>>>,
 	/// Oracle addresses for each network (network_id -> oracle_address).
@@ -36,6 +40,7 @@ impl DirectSettlement {
 	/// Configures settlement validation with multiple networks, oracle addresses,
 	/// and dispute period.
 	pub async fn new(
+		order: String,
 		network_ids: Vec<u64>,
 		networks: &NetworksConfig,
 		oracle_addresses: HashMap<u64, String>,
@@ -52,7 +57,13 @@ impl DirectSettlement {
 				))
 			})?;
 
-			let provider = RootProvider::new_http(network.rpc_url.parse().map_err(|e| {
+			let http_url = network.get_http_url().ok_or_else(|| {
+				SettlementError::ValidationFailed(format!(
+					"No HTTP RPC URL configured for network {}",
+					network_id
+				))
+			})?;
+			let provider = RootProvider::new_http(http_url.parse().map_err(|e| {
 				SettlementError::ValidationFailed(format!(
 					"Invalid RPC URL for network {}: {}",
 					network_id, e
@@ -75,6 +86,8 @@ impl DirectSettlement {
 		}
 
 		Ok(Self {
+			order,
+			network_ids: network_ids.clone(),
 			providers,
 			oracle_addresses: validated_oracle_addresses,
 			dispute_period_seconds,
@@ -98,6 +111,7 @@ impl ConfigSchema for DirectSettlementSchema {
 		let schema = Schema::new(
 			// Required fields
 			vec![
+				Field::new("order", FieldType::String),
 				Field::new(
 					"network_ids",
 					FieldType::Array(Box::new(FieldType::Integer {
@@ -152,8 +166,37 @@ impl ConfigSchema for DirectSettlementSchema {
 
 #[async_trait]
 impl SettlementInterface for DirectSettlement {
+	fn supported_order(&self) -> &str {
+		&self.order
+	}
+
+	fn supported_networks(&self) -> &[u64] {
+		&self.network_ids
+	}
+
 	fn config_schema(&self) -> Box<dyn ConfigSchema> {
 		Box::new(DirectSettlementSchema)
+	}
+
+	/// Returns the oracle address configured for a specific chain.
+	///
+	/// This implementation stores oracle addresses per chain in its configuration.
+	/// The addresses are stored as hex strings and converted to the Address type on demand.
+	///
+	/// # Arguments
+	/// * `chain_id` - The chain ID to get the oracle address for
+	///
+	/// # Returns
+	/// * `Some(Address)` if an oracle is configured for this chain and the address is valid
+	/// * `None` if no oracle is configured or the address format is invalid
+	fn get_oracle_address(&self, chain_id: u64) -> Option<solver_types::Address> {
+		self.oracle_addresses.get(&chain_id).and_then(|addr_str| {
+			let hex_str = without_0x_prefix(addr_str);
+			hex::decode(hex_str)
+				.ok()
+				.filter(|bytes| bytes.len() == 20)
+				.map(solver_types::Address)
+		})
 	}
 
 	/// Gets attestation data for a filled order and generates a fill proof.
@@ -165,20 +208,17 @@ impl SettlementInterface for DirectSettlement {
 		order: &Order,
 		tx_hash: &TransactionHash,
 	) -> Result<FillProof, SettlementError> {
-		// Parse order data to get the destination chain ID
+		// Get the destination chain ID from the order
+		// Note: For now we assume all outputs are on the same chain
+		let destination_chain_id = *order.output_chain_ids.first().ok_or_else(|| {
+			SettlementError::ValidationFailed("No output chains in order".to_string())
+		})?;
+
+		// Parse order data for other fields we need
 		let order_data: Eip7683OrderData =
 			serde_json::from_value(order.data.clone()).map_err(|e| {
 				SettlementError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
-
-		// Get the destination chain ID from the first output
-		// Note: For now we assume all outputs are on the same chain
-		let destination_chain_id = order_data
-			.outputs
-			.first()
-			.ok_or_else(|| SettlementError::ValidationFailed("No outputs in order".to_string()))?
-			.chain_id
-			.to::<u64>();
 
 		// Get the appropriate provider for this chain
 		let provider = self.providers.get(&destination_chain_id).ok_or_else(|| {
@@ -252,17 +292,17 @@ impl SettlementInterface for DirectSettlement {
 	/// Verifies that the dispute period has passed and all claim
 	/// requirements are met.
 	async fn can_claim(&self, order: &Order, fill_proof: &FillProof) -> bool {
-		// Parse order data to get the destination chain ID
-		let order_data: Eip7683OrderData = match serde_json::from_value(order.data.clone()) {
-			Ok(data) => data,
-			Err(_) => return false,
-		};
-
-		// Get the destination chain ID from the first output
-		let destination_chain_id = match order_data.outputs.first() {
-			Some(output) => output.chain_id.to::<u64>(),
+		// Get the destination chain ID from the order
+		let destination_chain_id = match order.output_chain_ids.first() {
+			Some(&chain_id) => chain_id,
 			None => return false,
 		};
+
+		// TODO: Parse order data if needed for dispute deadline check
+		// let order_data: Eip7683OrderData = match serde_json::from_value(order.data.clone()) {
+		//     Ok(data) => data,
+		//     Err(_) => return false,
+		// };
 
 		// Get the appropriate provider for this chain
 		let provider = match self.providers.get(&destination_chain_id) {
@@ -305,6 +345,7 @@ impl SettlementInterface for DirectSettlement {
 /// Factory function to create a settlement provider from configuration.
 ///
 /// Required configuration parameters:
+/// - `order`: The order type this implementation handles (e.g., "eip7683")
 /// - `network_ids`: Array of network IDs to monitor
 /// - `oracle_addresses`: Table mapping network_id -> oracle address
 ///
@@ -317,6 +358,13 @@ pub fn create_settlement(
 	// Validate configuration first
 	DirectSettlementSchema::validate_config(config)
 		.map_err(|e| SettlementError::ValidationFailed(format!("Invalid configuration: {}", e)))?;
+
+	// Get order type
+	let order_standard = config
+		.get("order")
+		.and_then(|v| v.as_str())
+		.ok_or_else(|| SettlementError::ValidationFailed("order is required".to_string()))?
+		.to_string();
 
 	// Get network IDs
 	let network_ids = config
@@ -366,6 +414,7 @@ pub fn create_settlement(
 	let settlement = tokio::task::block_in_place(|| {
 		tokio::runtime::Handle::current().block_on(async {
 			DirectSettlement::new(
+				order_standard,
 				network_ids,
 				networks,
 				oracle_addresses,
@@ -382,7 +431,7 @@ pub fn create_settlement(
 pub struct Registry;
 
 impl solver_types::ImplementationRegistry for Registry {
-	const NAME: &'static str = "eip7683";
+	const NAME: &'static str = "direct";
 	type Factory = crate::SettlementFactory;
 
 	fn factory() -> Self::Factory {

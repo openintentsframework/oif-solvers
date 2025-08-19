@@ -57,9 +57,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use solver_types::{
-	current_timestamp, standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema,
-	Eip7683OrderData, Field, FieldType, ImplementationRegistry, Intent, IntentMetadata,
-	NetworksConfig, Schema,
+	current_timestamp,
+	standards::eip7683::{GasLimitOverrides, MandateOutput},
+	with_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, ImplementationRegistry,
+	Intent, IntentMetadata, NetworksConfig, Schema,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -292,7 +293,13 @@ impl Eip7683OffchainDiscovery {
 		let mut providers = HashMap::new();
 		for network_id in &network_ids {
 			if let Some(network) = networks.get(network_id) {
-				let provider = RootProvider::new_http(network.rpc_url.parse().map_err(|e| {
+				let http_url = network.get_http_url().ok_or_else(|| {
+					DiscoveryError::Connection(format!(
+						"No HTTP RPC URL configured for network {}",
+						network_id
+					))
+				})?;
+				let provider = RootProvider::new_http(http_url.parse().map_err(|e| {
 					DiscoveryError::Connection(format!(
 						"Invalid RPC URL for network {}: {}",
 						network_id, e
@@ -480,8 +487,7 @@ impl Eip7683OffchainDiscovery {
 			input_oracle: with_0x_prefix(&hex::encode(order.inputOracle)),
 			inputs: order.inputs.clone(),
 			order_id,
-			settle_gas_limit: 200_000u64, // TODO: calculate exactly
-			fill_gas_limit: 200_000u64,   // TODO: calculate exactly
+			gas_limit_overrides: GasLimitOverrides::default(),
 			outputs: order
 				.outputs
 				.iter()
@@ -850,6 +856,10 @@ impl DiscoveryInterface for Eip7683OffchainDiscovery {
 
 		self.is_running.store(false, Ordering::SeqCst);
 		Ok(())
+	}
+
+	fn get_url(&self) -> Option<String> {
+		Some(format!("{}:{}", self.api_host, self.api_port))
 	}
 }
 
