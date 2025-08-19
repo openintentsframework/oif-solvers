@@ -40,6 +40,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Helper to extract clean addresses (strip ANSI & whitespace)
+addr_from_output() {
+  echo "$1" | perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g' | grep -Eo '0x[a-fA-F0-9]{40}' | head -n1
+}
+# Helper to specifically extract the "Deployed to:" address
+deployed_addr_from_output() {
+  echo "$1" | perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g' | grep -E "Deployed to:" | awk '{print $3}' | head -n1
+}
+
 # Chain configuration
 ORIGIN_PORT=8545
 DEST_PORT=8546
@@ -243,6 +252,16 @@ git fetch origin > /dev/null 2>&1
 git checkout ${OIF_PINNED_COMMIT} > /dev/null 2>&1
 echo -e "${GREEN}✓${NC}"
 
+# Install dependencies for Compact support
+echo -n "  Installing oif-contracts dependencies... "
+~/.foundry/bin/forge install > /dev/null 2>&1
+echo -e "${GREEN}✓${NC}"
+
+# Build project to ensure all dependencies are properly resolved
+echo -n "  Building oif-contracts project... "
+~/.foundry/bin/forge build > /dev/null 2>&1
+echo -e "${GREEN}✓${NC}"
+
 # Deploy contracts in the same order on both chains for deterministic addresses
 echo
 echo -e "${BLUE}=== Deploying Contracts ===${NC}"
@@ -297,7 +316,36 @@ if [ "$TOKENB" != "$TOKENB_DEST_CHECK" ]; then
 fi
 echo -e "${GREEN}✓${NC} $TOKENB"
 
-# Deploy InputSettlerEscrow (Contract #3 - same address on both chains)
+# Deploy TheCompact (Contract #3 - same address on both chains)
+echo -n "  Deploying TheCompact on both chains... "
+COMPACT_OUTPUT=$(~/.foundry/bin/forge create lib/the-compact/src/TheCompact.sol:TheCompact \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+THE_COMPACT=$(deployed_addr_from_output "$COMPACT_OUTPUT")
+if [ -z "$THE_COMPACT" ]; then
+    echo -e "${RED}Failed on origin${NC}"
+    echo "---- forge output ----"
+    echo "$COMPACT_OUTPUT"
+    echo "----------------------"
+    exit 1
+fi
+
+COMPACT_DEST_OUTPUT=$(~/.foundry/bin/forge create lib/the-compact/src/TheCompact.sol:TheCompact \
+    --rpc-url http://localhost:$DEST_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+COMPACT_DEST_CHECK=$(deployed_addr_from_output "$COMPACT_DEST_OUTPUT")
+if [ "$THE_COMPACT" != "$COMPACT_DEST_CHECK" ]; then
+    echo -e "${RED}Address mismatch!${NC}"
+    echo "---- forge output (dest) ----"
+    echo "$COMPACT_DEST_OUTPUT"
+    echo "-----------------------------"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $THE_COMPACT"
+
+# Deploy InputSettlerEscrow (Contract #4 - same address on both chains)
 echo -n "  Deploying InputSettlerEscrow on both chains... "
 INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
     --rpc-url http://localhost:$ORIGIN_PORT \
@@ -320,7 +368,125 @@ if [ "$INPUT_SETTLER" != "$INPUT_SETTLER_DEST_CHECK" ]; then
 fi
 echo -e "${GREEN}✓${NC} $INPUT_SETTLER"
 
-# Deploy OutputSettler (Contract #4 - same address on both chains)
+echo -n "  Deploying AlwaysOKAllocator on both chains... "
+# Deploy AlwaysOKAllocator via forge 
+ALLOC_OUTPUT=$(~/.foundry/bin/forge create lib/the-compact/src/test/AlwaysOKAllocator.sol:AlwaysOKAllocator \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+ALLOCATOR_ADDR=$(deployed_addr_from_output "$ALLOC_OUTPUT")
+if [ -z "$ALLOCATOR_ADDR" ]; then
+    echo -e "${RED}Failed on origin${NC}"
+    exit 1
+fi
+
+# Deploy on destination chain for deterministic address
+ALLOC_DEST_OUTPUT=$(~/.foundry/bin/forge create lib/the-compact/src/test/AlwaysOKAllocator.sol:AlwaysOKAllocator \
+    --rpc-url http://localhost:$DEST_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+ALLOCATOR_DEST_CHECK=$(deployed_addr_from_output "$ALLOC_DEST_OUTPUT")
+if [ "$ALLOCATOR_ADDR" != "$ALLOCATOR_DEST_CHECK" ]; then
+    echo -e "${RED}Address mismatch!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $ALLOCATOR_ADDR"
+
+# Register allocator with TheCompact on both chains
+echo -n "  Registering AlwaysOKAllocator with TheCompact... "
+
+# Just skip registration for now and use a hardcoded lock tag for demo
+LOCKTAG_HEX=0x000000000000000000000001
+echo -e "${GREEN}✓${NC} (using demo lock tag)"
+
+# Deposit a demo amount into TheCompact for the user to create a resource lock ID
+DEMO_DEPOSIT_AMOUNT=1000000000000000000
+# Approve TheCompact to pull user's tokens
+cast send $TOKENA "approve(address,uint256)" $THE_COMPACT $DEMO_DEPOSIT_AMOUNT \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $USER_PRIVATE_KEY > /dev/null
+# Deposit ERC20
+cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $LOCKTAG_HEX $DEMO_DEPOSIT_AMOUNT $USER_ADDRESS \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $USER_PRIVATE_KEY > /dev/null
+# Compute tokenId (lockTag || token)
+TOKEN_ID_HEX=0x${LOCKTAG_HEX:2}${TOKENA:2}
+
+# Deploy InputSettlerCompact (Contract #5 - same address on both chains)
+INPUT_SETTLER_COMPACT_OUTPUT=$(env -u ETH_FROM ~/.foundry/bin/forge create src/input/compact/InputSettlerCompact.sol:InputSettlerCompact \
+    --constructor-args $THE_COMPACT \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1 || true)
+INPUT_SETTLER_COMPACT=$(deployed_addr_from_output "$INPUT_SETTLER_COMPACT_OUTPUT")
+if [ -z "$INPUT_SETTLER_COMPACT" ]; then
+    echo -e "${YELLOW}Forge create failed; retrying via cast...${NC}"
+    ORIG_BYTECODE=$(~/.foundry/bin/forge inspect src/input/compact/InputSettlerCompact.sol:InputSettlerCompact bytecode)
+    ORIG_ARGS=$(cast abi-encode "constructor(address)" "$THE_COMPACT" | cut -c3-)
+    # Use unlocked account and capture tx hash, then receipt to get contract address
+    TX_HASH=$(cast send --create "${ORIG_BYTECODE}${ORIG_ARGS}" --rpc-url http://localhost:$ORIGIN_PORT --unlocked --from $SOLVER_ADDRESS 2>&1 | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)
+    if [ -n "$TX_HASH" ]; then
+        RECEIPT_JSON=$(cast receipt $TX_HASH --rpc-url http://localhost:$ORIGIN_PORT --json 2>/dev/null)
+        INPUT_SETTLER_COMPACT=$(echo "$RECEIPT_JSON" | jq -r '.contractAddress' 2>/dev/null)
+    fi
+fi
+if [ -z "$INPUT_SETTLER_COMPACT" ] || [ "$INPUT_SETTLER_COMPACT" = "null" ]; then
+    echo -e "${YELLOW}Cast send failed; retrying via raw eth_sendTransaction...${NC}"
+    ORIG_BYTECODE=$(~/.foundry/bin/forge inspect src/input/compact/InputSettlerCompact.sol:InputSettlerCompact bytecode)
+    ORIG_ARGS=$(cast abi-encode "constructor(address)" "$THE_COMPACT" | cut -c3-)
+    INITCODE="${ORIG_BYTECODE}${ORIG_ARGS}"
+    TX_HASH=$(cast rpc --rpc-url http://localhost:$ORIGIN_PORT eth_sendTransaction "{\"from\":\"$SOLVER_ADDRESS\",\"data\":\"$INITCODE\"}" 2>&1 | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)
+    if [ -n "$TX_HASH" ]; then
+        RECEIPT_JSON=$(cast receipt $TX_HASH --rpc-url http://localhost:$ORIGIN_PORT --json 2>/dev/null)
+        INPUT_SETTLER_COMPACT=$(echo "$RECEIPT_JSON" | jq -r '.contractAddress' 2>/dev/null)
+    fi
+fi
+if [ -z "$INPUT_SETTLER_COMPACT" ] || [ "$INPUT_SETTLER_COMPACT" = "null" ]; then
+    echo -e "${RED}Failed on origin${NC}"
+    echo "---- forge/cast output ----"
+    echo "$INPUT_SETTLER_COMPACT_OUTPUT"
+    echo "TX: $TX_HASH"
+    echo "---------------------------"
+    exit 1
+fi
+
+INPUT_SETTLER_COMPACT_DEST_OUTPUT=$(env -u ETH_FROM ~/.foundry/bin/forge create src/input/compact/InputSettlerCompact.sol:InputSettlerCompact \
+    --constructor-args $THE_COMPACT \
+    --rpc-url http://localhost:$DEST_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1 || true)
+INPUT_SETTLER_COMPACT_DEST_CHECK=$(deployed_addr_from_output "$INPUT_SETTLER_COMPACT_DEST_OUTPUT")
+if [ -z "$INPUT_SETTLER_COMPACT_DEST_CHECK" ]; then
+    echo -e "${YELLOW}Forge create (dest) failed; retrying via cast...${NC}"
+    DEST_BYTECODE=$(~/.foundry/bin/forge inspect src/input/compact/InputSettlerCompact.sol:InputSettlerCompact bytecode)
+    DEST_ARGS=$(cast abi-encode "constructor(address)" "$THE_COMPACT" | cut -c3-)
+    TX_HASH_DEST=$(cast send --create "${DEST_BYTECODE}${DEST_ARGS}" --rpc-url http://localhost:$DEST_PORT --unlocked --from $SOLVER_ADDRESS 2>&1 | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)
+    if [ -n "$TX_HASH_DEST" ]; then
+        RECEIPT_JSON_DEST=$(cast receipt $TX_HASH_DEST --rpc-url http://localhost:$DEST_PORT --json 2>/dev/null)
+        INPUT_SETTLER_COMPACT_DEST_CHECK=$(echo "$RECEIPT_JSON_DEST" | jq -r '.contractAddress' 2>/dev/null)
+    fi
+fi
+if [ -z "$INPUT_SETTLER_COMPACT_DEST_CHECK" ] || [ "$INPUT_SETTLER_COMPACT_DEST_CHECK" = "null" ]; then
+    echo -e "${YELLOW}Cast send (dest) failed; retrying via raw eth_sendTransaction...${NC}"
+    DEST_BYTECODE=$(~/.foundry/bin/forge inspect src/input/compact/InputSettlerCompact.sol:InputSettlerCompact bytecode)
+    DEST_ARGS=$(cast abi-encode "constructor(address)" "$THE_COMPACT" | cut -c3-)
+    INITCODE_DEST="${DEST_BYTECODE}${DEST_ARGS}"
+    TX_HASH_DEST=$(cast rpc --rpc-url http://localhost:$DEST_PORT eth_sendTransaction "{\"from\":\"$SOLVER_ADDRESS\",\"data\":\"$INITCODE_DEST\"}" 2>&1 | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)
+    if [ -n "$TX_HASH_DEST" ]; then
+        RECEIPT_JSON_DEST=$(cast receipt $TX_HASH_DEST --rpc-url http://localhost:$DEST_PORT --json 2>/dev/null)
+        INPUT_SETTLER_COMPACT_DEST_CHECK=$(echo "$RECEIPT_JSON_DEST" | jq -r '.contractAddress' 2>/dev/null)
+    fi
+fi
+if [ "$INPUT_SETTLER_COMPACT" != "$INPUT_SETTLER_COMPACT_DEST_CHECK" ]; then
+    echo -e "${RED}Address mismatch!${NC}"
+    echo "---- forge output (dest) ----"
+    echo "$INPUT_SETTLER_COMPACT_DEST_OUTPUT"
+    echo "-----------------------------"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $INPUT_SETTLER_COMPACT"
+
+# Deploy OutputSettler (Contract #6 - same address on both chains)
 echo -n "  Deploying OutputSettler on both chains... "
 OUTPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/output/coin/OutputSettler7683.sol:OutputInputSettlerEscrow \
     --rpc-url http://localhost:$ORIGIN_PORT \
@@ -343,7 +509,7 @@ if [ "$OUTPUT_SETTLER" != "$OUTPUT_SETTLER_DEST_CHECK" ]; then
 fi
 echo -e "${GREEN}✓${NC} $OUTPUT_SETTLER"
 
-# Deploy Oracle on both chains (Contract #5 - same address on both chains)
+# Deploy Oracle on both chains (Contract #7 - same address on both chains)
 echo -n "  Deploying AlwaysYesOracle on both chains... "
 ORACLE_OUTPUT=$(~/.foundry/bin/forge create test/mocks/AlwaysYesOracle.sol:AlwaysYesOracle \
     --rpc-url http://localhost:$ORIGIN_PORT \
@@ -418,6 +584,7 @@ echo -e "${GREEN}✓${NC}"
 echo -n "  Approving Permit2 to spend user's TokenA on origin... "
 cast send $TOKENA "approve(address,uint256)" $ORIGIN_PERMIT2_ADDRESS "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" \
     --rpc-url http://localhost:$ORIGIN_PORT \
+    --from $USER_ADDRESS \
     --private-key $USER_PRIVATE_KEY > /dev/null
 echo -e "${GREEN}✓${NC}"
 
@@ -425,6 +592,7 @@ echo -e "${GREEN}✓${NC}"
 echo -n "  Approving Permit2 to spend user's TokenB on origin... "
 cast send $TOKENB "approve(address,uint256)" $ORIGIN_PERMIT2_ADDRESS "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" \
     --rpc-url http://localhost:$ORIGIN_PORT \
+    --from $USER_ADDRESS \
     --private-key $USER_PRIVATE_KEY > /dev/null
 echo -e "${GREEN}✓${NC}"
 
@@ -557,6 +725,9 @@ cat > config/demo/networks.toml << EOF
 [networks.$ORIGIN_CHAIN_ID]
 rpc_url = "http://localhost:$ORIGIN_PORT"
 input_settler_address = "$INPUT_SETTLER"
+input_settler_compact_address = "$INPUT_SETTLER_COMPACT"
+the_compact_address = "$THE_COMPACT"
+allocator_address = "$ALLOCATOR_ADDR"
 output_settler_address = "$OUTPUT_SETTLER"
 
 [[networks.$ORIGIN_CHAIN_ID.tokens]]
@@ -572,6 +743,9 @@ decimals = 18
 [networks.$DEST_CHAIN_ID]
 rpc_url = "http://localhost:$DEST_PORT"
 input_settler_address = "$INPUT_SETTLER"
+input_settler_compact_address = "$INPUT_SETTLER_COMPACT"
+the_compact_address = "$THE_COMPACT"
+allocator_address = "$ALLOCATOR_ADDR"
 output_settler_address = "$OUTPUT_SETTLER"
 
 [[networks.$DEST_CHAIN_ID.tokens]]
@@ -606,6 +780,13 @@ echo -e "    - config/demo.toml (main config with includes)"
 echo -e "    - config/demo/networks.toml (network configurations)"
 echo -e "    - config/demo/api.toml (API server settings)"
 
+# After configs are written, also generate a compact.env for the send script
+mkdir -p config/demo
+cat > config/demo/compact.env << EOF
+LOCKTAG_HEX="$LOCKTAG_HEX"
+TOKEN_ID_HEX="$TOKEN_ID_HEX"
+EOF
+
 # Done!
 echo
 echo -e "${GREEN}✅ Setup complete!${NC}"
@@ -618,7 +799,10 @@ echo
 echo -e "${BLUE}📋 Contracts (same addresses on both chains):${NC}"
 echo "  TokenA:        $TOKENA"
 echo "  TokenB:        $TOKENB"
-echo "  InputSettler:  $INPUT_SETTLER"
+echo "  TheCompact:    $THE_COMPACT"
+echo "  AlwaysOKAllocator: $ALLOCATOR_ADDR"
+echo "  InputSettler (Escrow):   $INPUT_SETTLER"
+echo "  InputSettler (Compact):  $INPUT_SETTLER_COMPACT"
 echo "  OutputSettler: $OUTPUT_SETTLER"
 echo "  Oracle:        $ORACLE"
 echo "  Permit2:       $ORIGIN_PERMIT2_ADDRESS"

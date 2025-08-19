@@ -77,6 +77,11 @@ sol! {
 		function openFor(bytes calldata order, address sponsor, bytes calldata signature) external;
 	}
 
+	#[sol(rpc)]
+	interface IInputSettlerCompact {
+		function orderIdentifier(StandardOrder calldata order) external view returns (bytes32);
+	}
+
 	struct StandardOrder {
 		address user;
 		uint256 nonce;
@@ -451,7 +456,20 @@ impl Eip7683OffchainDiscovery {
 				"Invalid settler address length".to_string(),
 			));
 		}
-		let settler_address = Address::from_slice(&network.input_settler_address.0);
+		// Choose settler based on signature prefix (0x02 => Compact)
+		let is_compact = {
+			let raw = signature.clone();
+			!raw.0.is_empty() && raw.0[0] == 0x02
+		};
+		let settler_address = if is_compact {
+			let addr = network
+				.input_settler_compact_address
+				.clone()
+				.unwrap_or_else(|| network.input_settler_address.clone());
+			Address::from_slice(&addr.0)
+		} else {
+			Address::from_slice(&network.input_settler_address.0)
+		};
 
 		// Get provider for the origin chain
 		let provider = providers.get(&origin_chain_id).ok_or_else(|| {
@@ -541,17 +559,23 @@ impl Eip7683OffchainDiscovery {
 		provider: &RootProvider<Http<reqwest::Client>>,
 		settler_address: Address,
 	) -> Result<[u8; 32], DiscoveryError> {
-		let settler = IInputSettlerEscrow::new(settler_address, provider);
-
-		let order_id = settler
-			.orderIdentifier(order_bytes.clone())
+		use alloy_sol_types::SolValue;
+		let escrow = IInputSettlerEscrow::new(settler_address, provider);
+		if let Ok(resp) = escrow.orderIdentifier(order_bytes.clone()).call().await {
+			return Ok(resp._0.0);
+		}
+		let std_order = StandardOrder::abi_decode(order_bytes, true).map_err(|e| {
+			DiscoveryError::ParseError(format!("Failed to decode StandardOrder: {}", e))
+		})?;
+		let compact = IInputSettlerCompact::new(settler_address, provider);
+		let resp = compact
+			.orderIdentifier(std_order)
 			.call()
 			.await
 			.map_err(|e| {
 				DiscoveryError::Connection(format!("Failed to get order ID from contract: {}", e))
 			})?;
-
-		Ok(order_id._0.0)
+		Ok(resp._0.0)
 	}
 
 	/// Main API server task.

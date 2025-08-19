@@ -63,6 +63,12 @@ sol! {
 		function open(bytes calldata order) external;
 		function openFor(bytes calldata order, address sponsor, bytes calldata signature) external;
 	}
+
+	/// IInputSettlerCompact interface for Compact-based settlement.
+	interface IInputSettlerCompact {
+		function finalise(OrderStruct order, bytes signatures, uint32[] timestamps, bytes32[] solvers, bytes32 destination, bytes call) external;
+		function finaliseWithSignature(OrderStruct order, bytes signatures, uint32[] timestamps, bytes32[] solvers, bytes32 destination, bytes call, bytes signature) external;
+	}
 }
 
 /// EIP-7683 order implementation.
@@ -278,6 +284,12 @@ impl OrderInterface for Eip7683OrderImpl {
 		let signature = order_data.signature.as_ref().ok_or_else(|| {
 			OrderError::ValidationFailed("Missing signature for off-chain order".to_string())
 		})?;
+
+		// If this is a Compact flow (signature prefixed 0x02), we skip prepare/openFor.
+		let sig_no0x = signature.trim_start_matches("0x");
+		if sig_no0x.starts_with("02") {
+			return Ok(None);
+		}
 
 		// For the OIF contracts, we need to use the StandardOrder openFor
 		// The raw_order_data contains the encoded StandardOrder
@@ -558,22 +570,55 @@ impl OrderInterface for Eip7683OrderImpl {
 		// Empty call data for simple finalisation
 		let call = vec![];
 
-		// Encode the finalise call
-		let call_data = IInputSettlerEscrow::finaliseCall {
-			order: order_struct,
-			timestamps,
-			solvers,
-			destination,
-			call: call.into(),
-		}
-		.abi_encode();
+		// Encode the finalise call. If Compact flow, include signatures argument.
+		let call_data = {
+			let maybe_sig = serde_json::from_value::<Eip7683OrderData>(order.data.clone())
+				.ok()
+				.and_then(|d| d.signature);
+			if let Some(sig) = maybe_sig.as_deref() {
+				let s = sig.trim_start_matches("0x");
+				if s.starts_with("02") {
+					// Compact signatures: strip the 0x02 prefix and pass remaining bytes
+					let compact_sig_bytes = hex::decode(&s[2..]).map_err(|e| {
+						OrderError::ValidationFailed(format!("Invalid compact signatures: {}", e))
+					})?;
+					IInputSettlerCompact::finaliseCall {
+						order: order_struct,
+						signatures: compact_sig_bytes.into(),
+						timestamps,
+						solvers,
+						destination,
+						call: call.into(),
+					}
+					.abi_encode()
+				} else {
+					IInputSettlerEscrow::finaliseCall {
+						order: order_struct,
+						timestamps,
+						solvers,
+						destination,
+						call: call.into(),
+					}
+					.abi_encode()
+				}
+			} else {
+				IInputSettlerEscrow::finaliseCall {
+					order: order_struct,
+					timestamps,
+					solvers,
+					destination,
+					call: call.into(),
+				}
+				.abi_encode()
+			}
+		};
 
 		// Get the input settler address for the order's origin chain
 		let origin_chain_id = *order
 			.input_chain_ids
 			.first()
 			.ok_or_else(|| OrderError::ValidationFailed("No input chains in order".into()))?;
-		let input_settler_address = self
+		let network_cfg = self
 			.networks
 			.get(&origin_chain_id)
 			.ok_or_else(|| {
@@ -581,9 +626,21 @@ impl OrderInterface for Eip7683OrderImpl {
 					"Chain ID {} not found in networks configuration",
 					order_data.origin_chain_id
 				))
-			})?
-			.input_settler_address
-			.clone();
+			})?;
+		let is_compact = serde_json::from_value::<Eip7683OrderData>(order.data.clone())
+			.ok()
+			.and_then(|d| d.signature)
+			.map(|s| s.trim_start_matches("0x").starts_with("02"))
+			.unwrap_or(false);
+		let input_settler_address = if is_compact {
+			// Prefer compact-specific address if provided
+			network_cfg
+				.input_settler_compact_address
+				.clone()
+				.unwrap_or_else(|| network_cfg.input_settler_address.clone())
+		} else {
+			network_cfg.input_settler_address.clone()
+		};
 
 		Ok(Transaction {
 			to: Some(input_settler_address),

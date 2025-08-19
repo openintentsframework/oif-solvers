@@ -3,8 +3,11 @@
 
 [networks.31337]
 rpc_url = "http://localhost:8545"
-input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+input_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+input_settler_compact_address = "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707"
+the_compact_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+allocator_address = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+output_settler_address = "0x0165878A594ca255338adfa4d48449f69242Eb8F"
 
 [[networks.31337.tokens]]
 address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
@@ -18,8 +21,11 @@ decimals = 18
 
 [networks.31338]
 rpc_url = "http://localhost:8546"
-input_settler_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-output_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+input_settler_address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+input_settler_compact_address = "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707"
+the_compact_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+allocator_address = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+output_settler_address = "0x0165878A594ca255338adfa4d48449f69242Eb8F"
 
 [[networks.31338.tokens]]
 address = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
