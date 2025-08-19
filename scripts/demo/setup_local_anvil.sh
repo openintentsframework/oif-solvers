@@ -452,16 +452,16 @@ monitoring_timeout_minutes = 5
 # ============================================================================
 [storage]
 primary = "file"
-cleanup_interval_seconds = 3600
+cleanup_interval_seconds = 60
 
 [storage.implementations.memory]
 # Memory storage has no configuration
 
 [storage.implementations.file]
 storage_path = "./data/storage"
-ttl_orders = 0                  # Permanent
-ttl_intents = 86400             # 24 hours
-ttl_order_by_tx_hash = 86400    # 24 hours
+ttl_orders = 300                  # 5 minutes
+ttl_intents = 120                 # 2 minutes
+ttl_order_by_tx_hash = 300        # 5 minutes
 
 # ============================================================================
 # ACCOUNT
