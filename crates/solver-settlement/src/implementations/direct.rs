@@ -165,6 +165,11 @@ impl SettlementInterface for DirectSettlement {
 		order: &Order,
 		tx_hash: &TransactionHash,
 	) -> Result<FillProof, SettlementError> {
+		// Get the origin chain ID from the order
+		// Note: For now we assume all inputs are on the same chain
+		let origin_chain_id = *order.input_chain_ids.first().ok_or_else(|| {
+			SettlementError::ValidationFailed("No input chains in order".to_string())
+		})?;
 		// Get the destination chain ID from the order
 		// Note: For now we assume all outputs are on the same chain
 		let destination_chain_id = *order.output_chain_ids.first().ok_or_else(|| {
@@ -186,15 +191,12 @@ impl SettlementInterface for DirectSettlement {
 		})?;
 
 		// Get the oracle address for this chain
-		let oracle_address = self
-			.oracle_addresses
-			.get(&destination_chain_id)
-			.ok_or_else(|| {
-				SettlementError::ValidationFailed(format!(
-					"No oracle address configured for chain {}",
-					destination_chain_id
-				))
-			})?;
+		let oracle_address = self.oracle_addresses.get(&origin_chain_id).ok_or_else(|| {
+			SettlementError::ValidationFailed(format!(
+				"No oracle address configured for chain {}",
+				origin_chain_id
+			))
+		})?;
 
 		// Convert tx hash
 		let hash = FixedBytes::<32>::from_slice(&tx_hash.0);
