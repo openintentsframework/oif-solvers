@@ -28,14 +28,12 @@ INPUT_SETTLER_COMPACT=$(grep -A 5 '\[networks.31337\]' $NETWORKS_CONFIG | grep '
 THE_COMPACT=$(grep -A 5 '\[networks.31337\]' $NETWORKS_CONFIG | grep 'the_compact_address = ' | cut -d'"' -f2)
 OUTPUT_SETTLER_ADDRESS=$(grep -A 5 '\[networks.31338\]' $NETWORKS_CONFIG | grep 'output_settler_address = ' | cut -d'"' -f2)
 
-# Optional: precomputed Compact params from setup
-if [ -f "config/demo/compact.env" ]; then
+# Load precomputed Compact params from setup (now in root)
+if [ -f "compact.env" ]; then
   # shellcheck disable=SC1091
-  source config/demo/compact.env
+  source compact.env
+  echo -e "${GREEN}✅ Loaded compact.env with TOKEN_ID_HEX=$TOKEN_ID_HEX${NC}"
 fi
-# Fallbacks if not set
-LOCKTAG_HEX=${LOCKTAG_HEX:-"0x000000000000000000000000"}
-# TOKEN_ID_HEX if not provided will be constructed with zero lockTag and origin token
 
 ORACLE_ADDRESS=$(grep 'oracle_addresses = ' $MAIN_CONFIG | sed 's/.*31337 = "\([^"]*\)".*/\1/')
 
@@ -87,71 +85,60 @@ RECIPIENT_BYTES32="0x000000000000000000000000$(echo $RECIPIENT_ADDR | cut -c3-)"
 
 STANDARD_ORDER_ABI_TYPE='f((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))'
 
-# For demo, use precomputed TOKEN_ID_HEX from setup, or compute it
+# Get TOKEN_ID using TheCompact (like test file approach)
 if [ -z "$TOKEN_ID_HEX" ]; then
-  echo -e "${YELLOW}⚠️  TOKEN_ID_HEX not found in compact.env${NC}"
-  echo -e "${YELLOW}   Computing from lockTag and token address...${NC}"
+  echo -e "${BLUE}💰 Computing TOKEN_ID via TheCompact (like test file)...${NC}"
   
-  # Compute TOKEN_ID from lockTag and token address (lockTag || token)
-  TOKEN_ID_HEX=0x$(echo $LOCKTAG_HEX | cut -c3-)$(echo $ORIGIN_TOKEN_ADDRESS | cut -c3-)
-  echo -e "${GREEN}✅ Computed resource lock ID: $TOKEN_ID_HEX${NC}"
-  echo -e "${BLUE}   Note: This assumes allocator was registered during setup${NC}"
-fi
-TOKEN_ID_U256=$(cast to-dec $TOKEN_ID_HEX)
-
-# Check if user has sufficient balance in TheCompact for this resource lock
-echo -e "${BLUE}💰 Checking TheCompact balance...${NC}"
-COMPACT_BALANCE=$(cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDR $TOKEN_ID_U256 --rpc-url $ORIGIN_RPC_URL)
-COMPACT_BALANCE_DEC=$(cast to-dec $COMPACT_BALANCE 2>/dev/null || echo "0")
-REQUIRED_AMOUNT=$AMOUNT
-
-echo -e "   User balance in TheCompact: $(echo "scale=2; $COMPACT_BALANCE_DEC / 1000000000000000000" | bc -l) tokens"
-echo -e "   Required for order: $(echo "scale=2; $REQUIRED_AMOUNT / 1000000000000000000" | bc -l) tokens"
-
-# Use bc for large number comparison
-if [ $(echo "$COMPACT_BALANCE_DEC < $REQUIRED_AMOUNT" | bc) -eq 1 ]; then
-  echo -e "${YELLOW}⚠️  Insufficient balance in TheCompact, depositing tokens...${NC}"
+  # Check user balance first
+  USER_TOKEN_BALANCE=$(cast call $ORIGIN_TOKEN_ADDRESS "balanceOf(address)" $USER_ADDR --rpc-url $ORIGIN_RPC_URL)
+  USER_BALANCE_DEC=$(cast to-dec $USER_TOKEN_BALANCE 2>/dev/null || echo "0")
   
-  DEPOSIT_AMOUNT=$((REQUIRED_AMOUNT * 5))  # Deposit 5x the required amount
-  
-  # Approve TheCompact to spend user tokens
-  echo -e "${BLUE}   Approving TheCompact to spend tokens...${NC}"
-  cast send $ORIGIN_TOKEN_ADDRESS "approve(address,uint256)" $THE_COMPACT $DEPOSIT_AMOUNT \
-    --rpc-url $ORIGIN_RPC_URL \
-    --private-key $USER_PRIVATE_KEY > /dev/null
-  
-  # Deposit tokens into TheCompact
-  echo -e "${BLUE}   Depositing $(echo "scale=1; $DEPOSIT_AMOUNT / 1000000000000000000" | bc -l) tokens into TheCompact...${NC}"
-  DEPOSIT_TX=$(cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" \
-    $ORIGIN_TOKEN_ADDRESS $LOCKTAG_HEX $DEPOSIT_AMOUNT $USER_ADDR \
-    --rpc-url $ORIGIN_RPC_URL \
-    --private-key $USER_PRIVATE_KEY 2>&1)
-  
-  if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Failed to deposit tokens into TheCompact${NC}"
-    echo "$DEPOSIT_TX"
+  if [ $(echo "$USER_BALANCE_DEC < $AMOUNT" | bc) -eq 1 ]; then
+    echo -e "${RED}❌ Insufficient token balance for user${NC}"
+    echo -e "${YELLOW}💡 Run setup script first${NC}"
     exit 1
   fi
   
-  # Verify the new balance
-  NEW_BALANCE=$(cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDR $TOKEN_ID_U256 --rpc-url $ORIGIN_RPC_URL)
-  NEW_BALANCE_DEC=$(cast to-dec $NEW_BALANCE 2>/dev/null || echo "0")
-  echo -e "${GREEN}✅ New balance: $(echo "scale=2; $NEW_BALANCE_DEC / 1000000000000000000" | bc -l) tokens${NC}"
+  # Approve TheCompact to spend user tokens (like test file)
+  cast send $ORIGIN_TOKEN_ADDRESS "approve(address,uint256)" $THE_COMPACT $AMOUNT \
+    --rpc-url $ORIGIN_RPC_URL \
+    --private-key $USER_PRIVATE_KEY > /dev/null
+  
+  # Use depositERC20 to get the TOKEN_ID (like test file: depositERC20 returns tokenId)
+  echo -e "${BLUE}   Depositing via TheCompact to get TOKEN_ID...${NC}"
+  DEPOSIT_TX=$(cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" \
+    $ORIGIN_TOKEN_ADDRESS $ALWAYS_OK_ALLOCATOR_LOCK_TAG $AMOUNT $USER_ADDR \
+    --rpc-url $ORIGIN_RPC_URL \
+    --private-key $USER_PRIVATE_KEY 2>&1)
+  
+  # Extract tokenId from deposit transaction receipt (TheCompact emits Transfer event with tokenId)
+  if [ $? -eq 0 ]; then
+    # Get TX hash and receipt
+    TX_HASH=$(echo "$DEPOSIT_TX" | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)
+    if [ -n "$TX_HASH" ]; then
+      # Get the tokenId from Transfer event logs (id field in ERC1155 Transfer event)
+      RECEIPT=$(cast receipt $TX_HASH --rpc-url $ORIGIN_RPC_URL --json)
+      TOKEN_ID_HEX=$(echo "$RECEIPT" | jq -r '.logs[] | select(.topics[0] == "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62") | .topics[3]' | head -n1)
+      echo -e "${GREEN}✅ TOKEN_ID from deposit: $TOKEN_ID_HEX${NC}"
+    fi
+  fi
+  
+  # Fallback: compute manually if extraction failed
+  if [ -z "$TOKEN_ID_HEX" ] || [ "$TOKEN_ID_HEX" = "null" ]; then
+    echo -e "${YELLOW}   Fallback: computing TOKEN_ID manually${NC}"
+    TOKEN_ID_HEX=0x$(echo $ALWAYS_OK_ALLOCATOR_LOCK_TAG | cut -c3-)$(echo $ORIGIN_TOKEN_ADDRESS | cut -c3-)
+    echo -e "${GREEN}✅ Computed TOKEN_ID: $TOKEN_ID_HEX${NC}"
+  fi
 else
-  echo -e "${GREEN}✅ Sufficient balance available${NC}"
+  echo -e "${GREEN}✅ Using TOKEN_ID from config: $TOKEN_ID_HEX${NC}"
 fi
 
-# Build commitments hash using getLockHash approach from test (line 124-146)
-# Extract lockTag and token from TOKEN_ID as the test does
-EXTRACTED_LOCKTAG="0x$(echo $TOKEN_ID_HEX | cut -c3-26)"  # First 12 bytes (24 hex chars)
-EXTRACTED_TOKEN="0x$(echo $TOKEN_ID_HEX | cut -c27-66)"   # Last 20 bytes (40 hex chars)
+TOKEN_ID_U256=$(cast to-dec $TOKEN_ID_HEX)
 
-# Compute lock hash exactly like the test's getLockHash function
+# Compute commitments hash (simplified approach)
 LOCK_TYPE_HASH=$(cast keccak "Lock(bytes12 lockTag,address token,uint256 amount)")
-LOCK_HASH=$(cast keccak $(cast abi-encode "f(bytes32,bytes12,address,uint256)" "$LOCK_TYPE_HASH" "$EXTRACTED_LOCKTAG" "$EXTRACTED_TOKEN" "$AMOUNT"))
+LOCK_HASH=$(cast keccak $(cast abi-encode "f(bytes32,bytes12,address,uint256)" "$LOCK_TYPE_HASH" "$ALWAYS_OK_ALLOCATOR_LOCK_TAG" "$ORIGIN_TOKEN_ADDRESS" "$AMOUNT"))
 COMMITMENTS_HASH=$(cast keccak "$LOCK_HASH")
-
-# Commitments computed successfully
 
 ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" \
   "(${USER_ADDR},${NONCE},${ORIGIN_CHAIN_ID},${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[${TOKEN_ID_U256},${AMOUNT}]],[(${ZERO_BYTES32},${OUTPUT_SETTLER_BYTES32},${DEST_CHAIN_ID},${DEST_TOKEN_BYTES32},${AMOUNT},${RECIPIENT_BYTES32},0x,0x)])")

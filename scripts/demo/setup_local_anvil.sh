@@ -395,20 +395,28 @@ echo -e "${GREEN}✓${NC} $ALLOCATOR_ADDR"
 # Register allocator with TheCompact on both chains
 echo -n "  Registering AlwaysOKAllocator with TheCompact... "
 
-# Register the allocator on origin chain 
+# Register the allocator and extract the ID from logs (like test file approach)
 REGISTRATION_OUTPUT=$(cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
     --rpc-url http://localhost:$ORIGIN_PORT \
     --private-key $PRIVATE_KEY 2>&1)
 
-echo "REGISTRATION_OUTPUT: $REGISTRATION_OUTPUT"
+# Extract allocator ID from the AllocatorRegistered event logs  
+# Event data format: allocatorId (uint96, 32 bytes padded) + allocatorAddress (address, 32 bytes padded)
+# The allocatorId is in the first 64 hex chars, with the actual ID in the last 24 chars
+ALLOCATOR_ID_FROM_LOGS=$(echo "$REGISTRATION_OUTPUT" | grep -o '"data":"0x[^"]*"' | sed 's/"data":"0x//' | sed 's/"//' | cut -c41-64)
 
-# Check if registration succeeded or if allocator was already registered
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓${NC} Allocator registered successfully"
+if [ -n "$ALLOCATOR_ID_FROM_LOGS" ] && [ ${#ALLOCATOR_ID_FROM_LOGS} -eq 24 ]; then
+    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x${ALLOCATOR_ID_FROM_LOGS}"
+    echo -e "${GREEN}✓${NC} Extracted Lock Tag: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
+elif echo "$REGISTRATION_OUTPUT" | grep -q "AllocatorAlreadyRegistered"; then
+    # If already registered, use the known deterministic value
+    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x00a9beca4e685f962f0cf6c9" 
+    echo -e "${GREEN}✓${NC} Already registered, using known Lock Tag: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 else
-    # Check if it failed because allocator is already registered
-    if echo "$REGISTRATION_OUTPUT" | grep -q "AllocatorAlreadyRegistered"; then
-        echo -e "${GREEN}✓${NC} Allocator already registered"
+    # Check if registration succeeded but we couldn't extract
+    if echo "$REGISTRATION_OUTPUT" | grep -q "status.*1.*success"; then
+        ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x00a9beca4e685f962f0cf6c9"
+        echo -e "${GREEN}✓${NC} Registration succeeded, using known Lock Tag: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
     else
         echo -e "${RED}❌ Registration failed${NC}"
         echo "$REGISTRATION_OUTPUT"
@@ -416,31 +424,7 @@ else
     fi
 fi
 
-# Extract the allocator ID from the registration logs (like the test file does)
-# The AllocatorRegistered event has: allocatorId (uint96) + allocatorAddress (address)
-# Get the allocator ID from the event data (first 64 hex chars, take last 24)
-ALLOCATOR_ID_FROM_LOGS=$(echo "$REGISTRATION_OUTPUT" | grep -o '"data":"0x[^"]*"' | sed 's/"data":"0x//' | sed 's/"//' | cut -c41-64)
-
-if [ -n "$ALLOCATOR_ID_FROM_LOGS" ] && [ ${#ALLOCATOR_ID_FROM_LOGS} -eq 24 ]; then
-    # This is the bytes12 representation directly from the event logs
-    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x${ALLOCATOR_ID_FROM_LOGS}"
-    echo "Extracted allocator ID from logs: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
-else
-    echo -e "${YELLOW}Could not extract from logs, using hardcoded value${NC}"
-    # Fall back to your original working value
-    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x00a9beca4e685f962f0cf6c9"
-fi
-
-# Verify the lock tag length
-LOCKTAG_LENGTH=${#ALWAYS_OK_ALLOCATOR_LOCK_TAG}
-if [ $LOCKTAG_LENGTH -ne 26 ]; then  # 0x + 24 hex chars = 26 total
-    echo -e "${RED}Invalid lock tag length: $LOCKTAG_LENGTH (expected 26)${NC}"
-    exit 1
-fi
-
 ALLOCATOR_ID_HEX=$ALWAYS_OK_ALLOCATOR_LOCK_TAG
-
-echo -e "${GREEN}✓${NC} Allocator ID: $ALLOCATOR_ID_HEX, Lock Tag: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 
 # Also register on destination chain for consistency
 cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
@@ -868,9 +852,8 @@ echo -e "    - config/demo.toml (main config with includes)"
 echo -e "    - config/demo/networks.toml (network configurations)"
 echo -e "    - config/demo/api.toml (API server settings)"
 
-# After configs are written, also generate a compact.env for the send script
-mkdir -p config/demo
-cat > config/demo/compact.env << EOF
+# Generate compact.env in root for the send script
+cat > compact.env << EOF
 ALWAYS_OK_ALLOCATOR_LOCK_TAG="$ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 TOKEN_ID_HEX="$TOKEN_ID_HEX"
 ALLOCATOR_ID_HEX="$ALLOCATOR_ID_HEX"
