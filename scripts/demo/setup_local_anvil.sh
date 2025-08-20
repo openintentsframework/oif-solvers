@@ -395,9 +395,44 @@ echo -e "${GREEN}✓${NC} $ALLOCATOR_ADDR"
 # Register allocator with TheCompact on both chains
 echo -n "  Registering AlwaysOKAllocator with TheCompact... "
 
-# Just skip registration for now and use a hardcoded lock tag for demo
-LOCKTAG_HEX=0x000000000000000000000001
-echo -e "${GREEN}✓${NC} (using demo lock tag)"
+# Register the allocator on origin chain
+REG_TX=$(cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $PRIVATE_KEY 2>&1)
+
+# Check if registration succeeded or if allocator was already registered
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓${NC} Allocator registered successfully"
+else
+    # Check if it failed because allocator is already registered
+    if echo "$REG_TX" | grep -q "AllocatorAlreadyRegistered"; then
+        echo -e "${GREEN}✓${NC} Allocator already registered"
+    else
+        echo -e "${RED}❌ Registration failed${NC}"
+        echo "$REG_TX"
+        exit 1
+    fi
+fi
+
+# Extract the actual allocator ID from the address (last 88 bits + 4-bit compact flag)
+# This matches IdLib.toAllocatorId() logic
+ALLOCATOR_ADDR_HEX=${ALLOCATOR_ADDR:2}  # Remove 0x prefix
+ALLOCATOR_LAST_88_BITS=${ALLOCATOR_ADDR_HEX:8}  # Take last 22 hex chars (88 bits)
+
+# Compute compact flag (simplified: just use the actual logic result)
+# For 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9, the compact flag is 0xa
+COMPACT_FLAG="a"
+ALLOCATOR_ID_HEX="0x${COMPACT_FLAG}${ALLOCATOR_LAST_88_BITS}"
+
+# The lock tag is just the allocator ID as bytes12 (since scope=0, resetPeriod=0)
+LOCKTAG_HEX=$ALLOCATOR_ID_HEX
+
+echo -e "${GREEN}✓${NC} Allocator ID: $ALLOCATOR_ID_HEX, Lock Tag: $LOCKTAG_HEX"
+
+# Also register on destination chain for consistency
+cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
+    --rpc-url http://localhost:$DEST_PORT \
+    --private-key $PRIVATE_KEY > /dev/null 2>&1
 
 # Deposit a demo amount into TheCompact for the user to create a resource lock ID
 DEMO_DEPOSIT_AMOUNT=1000000000000000000
@@ -411,6 +446,7 @@ cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $
     --private-key $USER_PRIVATE_KEY > /dev/null
 # Compute tokenId (lockTag || token)
 TOKEN_ID_HEX=0x${LOCKTAG_HEX:2}${TOKENA:2}
+echo -e "${GREEN}✓${NC} Resource lock ID: $TOKEN_ID_HEX"
 
 # Deploy InputSettlerCompact (Contract #5 - same address on both chains)
 INPUT_SETTLER_COMPACT_OUTPUT=$(env -u ETH_FROM ~/.foundry/bin/forge create src/input/compact/InputSettlerCompact.sol:InputSettlerCompact \

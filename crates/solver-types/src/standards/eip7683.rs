@@ -57,6 +57,9 @@ pub struct Eip7683OrderData {
 	/// Optional sponsor address for off-chain orders
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sponsor: Option<String>,
+	/// Optional lock type: 1=escrow/permit2, 3=resource lock (The Compact)
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub lock_type: Option<u8>,
 }
 
 /// Represents a MandateOutput of the OIF contracts.

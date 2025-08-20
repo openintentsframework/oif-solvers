@@ -82,7 +82,7 @@ address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
 [settlement.implementations.direct]
 order = "eip7683"
 network_ids = [31337, 31338]
-oracle_addresses = { 31337 = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853", 31338 = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853" }
+oracle_addresses = { 31337 = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6", 31338 = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6" }
 dispute_period_seconds = 1
 
 

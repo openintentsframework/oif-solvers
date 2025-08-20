@@ -48,6 +48,6 @@ pub use standards::{
 pub use storage::*;
 pub use utils::{
 	bytes32_to_address, current_timestamp, format_token_amount, truncate_id, with_0x_prefix,
-	without_0x_prefix,
+	without_0x_prefix, format_standard_order_lines, normalize_bytes32_address,
 };
 pub use validation::*;

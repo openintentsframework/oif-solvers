@@ -60,7 +60,7 @@ use solver_types::{
 	current_timestamp,
 	standards::eip7683::{GasLimitOverrides, MandateOutput},
 	with_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, ImplementationRegistry,
-	Intent, IntentMetadata, NetworksConfig, Schema,
+	Intent, IntentMetadata, NetworksConfig, Schema, format_standard_order_lines, normalize_bytes32_address,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -104,6 +104,8 @@ sol! {
 		bytes context;
 	}
 }
+
+// Removed local logger; consolidated in `solver_types::utils::format_standard_order_lines`
 
 /// API representation of StandardOrder for JSON deserialization.
 ///
@@ -184,6 +186,26 @@ where
 	Ok(bytes)
 }
 
+/// Flexible deserializer for u8 that accepts numbers or numeric strings.
+fn deserialize_u8_flexible<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	use serde::de::Error;
+	let v = serde_json::Value::deserialize(deserializer)?;
+	match v {
+		serde_json::Value::Number(n) => n
+			.as_u64()
+			.and_then(|x| if x <= u8::MAX as u64 { Some(x as u8) } else { None })
+			.ok_or_else(|| Error::custom("u8 out of range")),
+		serde_json::Value::String(s) => s
+			.parse::<u8>()
+			.map_err(|_| Error::custom("invalid u8 string")),
+		serde_json::Value::Null => Ok(default_lock_type()),
+		_ => Err(Error::custom("expected number or numeric string for u8")),
+	}
+}
+
 /// API request wrapper for intent submission.
 ///
 /// This is the top-level structure for POST /intent requests with the OIF format.
@@ -198,7 +220,11 @@ struct IntentRequest {
 	order: Bytes,
 	sponsor: Address,
 	signature: Bytes,
+	#[serde(default = "default_lock_type", deserialize_with = "deserialize_u8_flexible")]
+	lock_type: u8, // 1=permit2-escrow, 2=3009-escrow, 3=lock-resource-lock (work around)
 }
+
+fn default_lock_type() -> u8 { 1 }
 
 /// API response for intent submission.
 ///
@@ -442,6 +468,7 @@ impl Eip7683OffchainDiscovery {
 		order_bytes: &Bytes,
 		sponsor: &Address,
 		signature: &Bytes,
+		lock_type: u8,
 		providers: &HashMap<u64, RootProvider<Http<reqwest::Client>>>,
 		networks: &NetworksConfig,
 	) -> Result<Intent, DiscoveryError> {
@@ -462,12 +489,8 @@ impl Eip7683OffchainDiscovery {
 				"Invalid settler address length".to_string(),
 			));
 		}
-		// Choose settler based on signature prefix (0x02 => Compact)
-		let is_compact = {
-			let raw = signature.clone();
-			!raw.0.is_empty() && raw.0[0] == 0x02
-		};
-		let settler_address = if is_compact {
+		// Choose settler based on lock_type (3 => Compact)
+		let settler_address = if lock_type == 3 {
 			let addr = network
 				.input_settler_compact_address
 				.clone()
@@ -509,15 +532,20 @@ impl Eip7683OffchainDiscovery {
 			outputs: order
 				.outputs
 				.iter()
-				.map(|output| MandateOutput {
-					oracle: output.oracle.0,
-					settler: output.settler.0,
-					chain_id: output.chainId,
-					token: output.token.0,
-					amount: output.amount,
-					recipient: output.recipient.0,
-					call: output.call.clone().into(),
-					context: output.context.clone().into(),
+				.map(|output| {
+					let settler = normalize_bytes32_address(output.settler.0);
+					let token = normalize_bytes32_address(output.token.0);
+					let recipient = normalize_bytes32_address(output.recipient.0);
+					MandateOutput {
+						oracle: output.oracle.0,
+						settler,
+						chain_id: output.chainId,
+						token,
+						amount: output.amount,
+						recipient,
+						call: output.call.clone().into(),
+						context: output.context.clone().into(),
+					}
 				})
 				.collect(),
 			// Include raw order data for openFor
@@ -525,6 +553,7 @@ impl Eip7683OffchainDiscovery {
 			// Include signature and sponsor
 			signature: Some(with_0x_prefix(&hex::encode(signature))),
 			sponsor: Some(sponsor.to_string()),
+			lock_type: Some(lock_type),
 		};
 
 		Ok(Intent {
@@ -683,11 +712,16 @@ async fn handle_intent_submission(
 	// if let Some(token) = &state.auth_token {
 	//     // Check Authorization header
 	// }
-
+	tracing::debug!(
+		request_sponsor = ?request.sponsor,
+		request_lock_type = request.lock_type,
+		"Received /intent request"
+	);
 	// Parse the StandardOrder from bytes
 	let order = match Eip7683OffchainDiscovery::parse_standard_order(&request.order) {
 		Ok(order) => order,
 		Err(e) => {
+			tracing::warn!(error = %e, "Failed to parse StandardOrder from request");
 			return (
 				StatusCode::BAD_REQUEST,
 				Json(IntentResponse {
@@ -699,11 +733,37 @@ async fn handle_intent_submission(
 				.into_response();
 		}
 	};
+	tracing::info!("Parsed order");
+	// Log parsed order details per line for readability
+	let first_output = order.outputs.get(0).map(|o| {
+		(
+			o.oracle.0,
+			o.settler.0,
+			o.chainId,
+			o.token.0,
+			o.amount,
+			o.recipient.0,
+			o.call.len(),
+			o.context.len(),
+		)
+	});
+	let lines = format_standard_order_lines(
+		order.user,
+		order.nonce,
+		order.originChainId,
+		order.expires,
+		order.fillDeadline,
+		order.inputOracle,
+		&order.inputs,
+		first_output,
+	);
+	for line in lines { tracing::info!("{}", line); }
 
 	// Validate order
 	if let Err(e) =
 		Eip7683OffchainDiscovery::validate_order(&order, &request.sponsor, &request.signature).await
 	{
+		tracing::warn!(error = %e, "Order validation failed");
 		return (
 			StatusCode::BAD_REQUEST,
 			Json(IntentResponse {
@@ -720,6 +780,7 @@ async fn handle_intent_submission(
 		&request.order,
 		&request.sponsor,
 		&request.signature,
+		request.lock_type,
 		&state.providers,
 		&state.networks,
 	)
@@ -730,6 +791,7 @@ async fn handle_intent_submission(
 
 			// Send intent through channel
 			if let Err(e) = state.intent_sender.send(intent) {
+				tracing::warn!(error = %e, "Failed to send intent to solver channel");
 				return (
 					StatusCode::INTERNAL_SERVER_ERROR,
 					Json(IntentResponse {
@@ -741,6 +803,7 @@ async fn handle_intent_submission(
 					.into_response();
 			}
 
+			tracing::info!(%order_id, "Intent accepted and forwarded to solver");
 			(
 				StatusCode::OK,
 				Json(IntentResponse {
@@ -751,15 +814,18 @@ async fn handle_intent_submission(
 			)
 				.into_response()
 		}
-		Err(e) => (
-			StatusCode::BAD_REQUEST,
-			Json(IntentResponse {
-				order_id: String::new(),
-				status: "error".to_string(),
-				message: Some(e.to_string()),
-			}),
-		)
-			.into_response(),
+		Err(e) => {
+			tracing::warn!(error = %e, "Failed to convert order to intent");
+			(
+				StatusCode::BAD_REQUEST,
+				Json(IntentResponse {
+					order_id: String::new(),
+					status: "error".to_string(),
+					message: Some(e.to_string()),
+				}),
+			)
+				.into_response()
+		}
 	}
 }
 

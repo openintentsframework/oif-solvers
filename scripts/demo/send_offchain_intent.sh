@@ -455,13 +455,16 @@ else
     echo -e "${GREEN}✅ EIP-712 signature generated: $SIGNATURE${NC}"
 fi
 
+LOCK_TYPE=1
 # Create the final JSON payload with signature
 # The API expects the StandardOrder in bytes format along with the signature
 # The signature needs to be prefixed with 0x00 for SIGNATURE_TYPE_PERMIT2
+# lock_type could be 1=permit2-escrow, 2=3009-escrow, 3=lock-resource-lock
 PREFIXED_SIGNATURE="0x00${SIGNATURE:2}"
 JSON_PAYLOAD=$(cat <<EOF
 {
   "order": "$ORDER_DATA",
+  "lock_type": "$LOCK_TYPE",
   "sponsor": "$USER_ADDR",
   "signature": "$PREFIXED_SIGNATURE"
 }

@@ -257,6 +257,7 @@ impl Eip7683Discovery {
 			raw_order_data: Some(with_0x_prefix(&hex::encode(order_bytes))),
 			signature: None,
 			sponsor: None,
+			lock_type: Some(1),
 		};
 
 		Ok(Intent {
