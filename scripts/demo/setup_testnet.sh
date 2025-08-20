@@ -8,13 +8,21 @@
 #
 # 1. Uses SOLVER_ADDRESS and USER_ADDRESS defined below
 # 2. Deploys smart contracts on both testnets:
-#    - InputSettlerEscrow on Base Sepolia (origin chain)
-#    - OutputSettler7683 on Arbitrum Sepolia (destination chain)
+#    - InputSettlerEscrow on origin chain
+#    - OutputSettler7683 on destination chain
 #    - Mock Oracle contract for intent validation
 #
 # 3. Configures the test environment for USDC transfers:
 #    - Uses USDC on both chains (requires token balances)
 #    - Generates modular configuration files for the solver
+#
+# Usage: ./setup_testnet.sh --origin <chain> --dest <chain> [options]
+#   Available chains: base-sepolia, arbitrum-sepolia, optimism-sepolia, ethereum-sepolia
+#   
+#   Examples:
+#     ./setup_testnet.sh --origin base-sepolia --dest arbitrum-sepolia
+#     ./setup_testnet.sh --origin ethereum-sepolia --dest optimism-sepolia
+#     ./setup_testnet.sh --help
 #
 # After running this script, you can:
 # - Start the solver with: cargo run --bin solver-service -- --config config/testnet.toml
@@ -28,6 +36,102 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Default values
+ORIGIN_CHAIN=""
+DEST_CHAIN=""
+CHAINS_CONFIG="$(dirname "$0")/testnet_chains.json"
+
+# ============================================================================
+# COMMAND LINE ARGUMENT PARSING
+# ============================================================================
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --origin)
+                ORIGIN_CHAIN="$2"
+                shift 2
+                ;;
+            --dest|--destination)
+                DEST_CHAIN="$2"
+                shift 2
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --list-chains)
+                list_available_chains
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+show_help() {
+    echo -e "${BLUE}OIF Solver Testnet Setup Script${NC}"
+    echo "===================================="
+    echo
+    echo "Usage: $0 --origin <chain> --dest <chain> [options]"
+    echo
+    echo "Required Arguments:"
+    echo "  --origin <chain>     Origin chain for cross-chain transfers"
+    echo "  --dest <chain>       Destination chain for cross-chain transfers"
+    echo
+    echo "Options:"
+    echo "  --help, -h           Show this help message"
+    echo "  --list-chains        List all available testnet chains"
+    echo
+    echo "Examples:"
+    echo "  $0 --origin base-sepolia --dest arbitrum-sepolia"
+    echo "  $0 --origin ethereum-sepolia --dest optimism-sepolia"
+    echo "  $0 --list-chains"
+    echo
+}
+
+list_available_chains() {
+    echo -e "${BLUE}Available Testnet Chains:${NC}"
+    echo "========================"
+    jq -r 'keys[] as $k | "\($k): \(.[$k].name) (Chain ID: \(.[$k].chain_id))"' "$CHAINS_CONFIG"
+}
+
+# ============================================================================
+# CHAIN CONFIGURATION FUNCTIONS
+# ============================================================================
+get_chain_config() {
+    local chain_name=$1
+    local config_key=$2
+    
+    if [ ! -f "$CHAINS_CONFIG" ]; then
+        echo -e "${RED}❌ Chain configuration file not found: $CHAINS_CONFIG${NC}"
+        exit 1
+    fi
+    
+    local result=$(jq -r ".\"$chain_name\".\"$config_key\" // empty" "$CHAINS_CONFIG" 2>/dev/null)
+    
+    if [ -z "$result" ] || [ "$result" = "null" ]; then
+        echo -e "${RED}❌ Configuration not found for chain '$chain_name' key '$config_key'${NC}"
+        exit 1
+    fi
+    
+    echo "$result"
+}
+
+validate_chain_exists() {
+    local chain_name=$1
+    
+    if ! jq -e ".\"$chain_name\"" "$CHAINS_CONFIG" >/dev/null 2>&1; then
+        echo -e "${RED}❌ Unknown chain: $chain_name${NC}"
+        echo "Available chains:"
+        jq -r 'keys[]' "$CHAINS_CONFIG" | sed 's/^/  - /'
+        exit 1
+    fi
+}
+
 # ============================================================================
 # ADDRESSES - PASTE YOUR ADDRESSES HERE
 # ============================================================================
@@ -36,26 +140,6 @@ SOLVER_PRIVATE_KEY="" # Your solver private key here
 USER_ADDRESS=""    # Your user address here
 USER_PRIVATE_KEY="" # Your user private key here
 DEST_RECIPIENT_ADDR="" # address of the destination recipient where the tokens will be sent to
-
-# ============================================================================
-# CONFIGURATION - UPDATE THESE VALUES
-# ============================================================================
-
-# RPC URLs for the testnets (you can use public endpoints or private RPCs if you have them)
-ORIGIN_RPC_URL="https://sepolia.base.org"
-DEST_RPC_URL="https://arbitrum-sepolia.drpc.org"
-
-# Chain IDs
-ORIGIN_CHAIN_ID=84532     # Base Sepolia
-DEST_CHAIN_ID=421614      # Arbitrum Sepolia
-
-# USDC Token Addresses
-ORIGIN_USDC_ADDRESS="0x036CbD53842c5426634e7929541eC2318f3dCF7e"    # USDC on Base Sepolia
-DEST_USDC_ADDRESS="0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"    # USDC on Arbitrum Sepolia
-# Note: Please verify the Arbitrum Sepolia USDC address above. You may need to:
-# 1. Check https://sepolia.arbiscan.io/ for the correct USDC contract address
-# 2. Or deploy your own test USDC token on Arbitrum Sepolia
-# 3. Or use an existing testnet token if USDC is not available
 
 # Load environment variables from .env file
 load_env_file() {
@@ -67,7 +151,7 @@ load_env_file() {
         echo -e "${YELLOW}Please create a .env file with your deployment private key:${NC}"
         echo "  DEPLOYMENT_PRIVATE_KEY=0x_your_64_character_hex_key_here"
         echo
-        echo -e "${YELLOW}Get your private key from MetaMask:${NC}"
+        echo -e "${YELLOW}Get your private key from :${NC}"
         echo "  Account Details > Export Private Key"
         echo "  WARNING: Only use testnet accounts, NEVER mainnet keys!"
         exit 1
@@ -139,7 +223,37 @@ validate_config() {
     fi
 }
 
-echo -e "${BLUE}🔧 Testnet USDC Setup (Base Sepolia + Arbitrum Sepolia)${NC}"
+# Parse command line arguments
+parse_args "$@"
+
+# Validate required arguments
+if [ -z "$ORIGIN_CHAIN" ] || [ -z "$DEST_CHAIN" ]; then
+    echo -e "${RED}❌ Missing required arguments${NC}"
+    echo "Usage: $0 --origin <chain> --dest <chain>"
+    echo "Use --help for more information"
+    exit 1
+fi
+
+# Validate chains exist in configuration
+validate_chain_exists "$ORIGIN_CHAIN"
+validate_chain_exists "$DEST_CHAIN"
+
+# Load chain configurations
+ORIGIN_CHAIN_ID=$(get_chain_config "$ORIGIN_CHAIN" "chain_id")
+ORIGIN_CHAIN_NAME=$(get_chain_config "$ORIGIN_CHAIN" "name")
+ORIGIN_RPC_URL=$(get_chain_config "$ORIGIN_CHAIN" "rpc_url")
+ORIGIN_USDC_ADDRESS=$(get_chain_config "$ORIGIN_CHAIN" "usdc_address")
+ORIGIN_EXPLORER_URL=$(get_chain_config "$ORIGIN_CHAIN" "explorer_url")
+ORIGIN_BRIDGE_INFO=$(get_chain_config "$ORIGIN_CHAIN" "bridge_info")
+
+DEST_CHAIN_ID=$(get_chain_config "$DEST_CHAIN" "chain_id")
+DEST_CHAIN_NAME=$(get_chain_config "$DEST_CHAIN" "name")
+DEST_RPC_URL=$(get_chain_config "$DEST_CHAIN" "rpc_url")
+DEST_USDC_ADDRESS=$(get_chain_config "$DEST_CHAIN" "usdc_address")
+DEST_EXPLORER_URL=$(get_chain_config "$DEST_CHAIN" "explorer_url")
+DEST_BRIDGE_INFO=$(get_chain_config "$DEST_CHAIN" "bridge_info")
+
+echo -e "${BLUE}🔧 Testnet USDC Setup ($ORIGIN_CHAIN_NAME → $DEST_CHAIN_NAME)${NC}"
 echo "======================================================="
 
 # Validate addresses first
@@ -167,8 +281,8 @@ OIF_PINNED_COMMIT="f2a9e8ab9d652894a090814421a7acb9a0547737"
 
 echo
 echo -e "${GREEN}✅ Configuration validated${NC}"
-echo "  Origin Chain:      Base Sepolia (Chain ID: $ORIGIN_CHAIN_ID)"
-echo "  Destination Chain: Arbitrum Sepolia (Chain ID: $DEST_CHAIN_ID)"
+echo "  Origin Chain:      $ORIGIN_CHAIN_NAME (Chain ID: $ORIGIN_CHAIN_ID)"
+echo "  Destination Chain: $DEST_CHAIN_NAME (Chain ID: $DEST_CHAIN_ID)"
 echo "  Deployer Address:  $DEPLOYER_ADDRESS"
 echo "  Solver Address:    $SOLVER_ADDRESS"
 echo "  Asset:             USDC on both chains"
@@ -180,7 +294,7 @@ echo
 echo -e "${YELLOW}1. Verifying network connectivity...${NC}"
 echo "  Debug: ORIGIN_RPC_URL = $ORIGIN_RPC_URL"
 echo "  Debug: DEST_RPC_URL = $DEST_RPC_URL"
-echo -n "  Testing Base Sepolia RPC... "
+echo -n "  Testing $ORIGIN_CHAIN_NAME RPC... "
 
 # Test if cast command exists
 if ! command -v cast &> /dev/null; then
@@ -197,16 +311,16 @@ else
     echo "Debug: Trying to connect to: $ORIGIN_RPC_URL"
     echo "Debug: Cast command output:"
     cast chain-id --rpc-url "$ORIGIN_RPC_URL" 2>&1 || true
-    echo "Please check your BASE_SEPOLIA_RPC_URL in the script configuration"
+    echo "Please check your $ORIGIN_CHAIN_NAME RPC URL configuration"
     exit 1
 fi
 
-echo -n "  Testing Arbitrum Sepolia RPC... "
+echo -n "  Testing $DEST_CHAIN_NAME RPC... "
 if cast chain-id --rpc-url "$DEST_RPC_URL" > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}Failed${NC}"
-    echo "Please check your ARBITRUM_SEPOLIA_RPC_URL in the script configuration"
+    echo "Please check your $DEST_CHAIN_NAME RPC URL configuration"
     exit 1
 fi
 
@@ -219,10 +333,10 @@ DEPLOYER_DEST_BALANCE=$(cast balance $DEPLOYER_ADDRESS --rpc-url "$DEST_RPC_URL"
 DEPLOYER_ORIGIN_USDC=$(cast call $ORIGIN_USDC_ADDRESS "balanceOf(address)(uint256)" $DEPLOYER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
 DEPLOYER_DEST_USDC=$(cast call $DEST_USDC_ADDRESS "balanceOf(address)(uint256)" $DEPLOYER_ADDRESS --rpc-url "$DEST_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
 
-echo "  Deployer Base Sepolia ETH:     ${DEPLOYER_ORIGIN_BALANCE} ETH"
-echo "  Deployer Arbitrum Sepolia ETH: ${DEPLOYER_DEST_BALANCE} ETH"
-echo "  Deployer Base Sepolia USDC:    ${DEPLOYER_ORIGIN_USDC} USDC"
-echo "  Deployer Arbitrum Sepolia USDC: ${DEPLOYER_DEST_USDC} USDC"
+echo "  Deployer $ORIGIN_CHAIN_NAME ETH:     ${DEPLOYER_ORIGIN_BALANCE} ETH"
+echo "  Deployer $DEST_CHAIN_NAME ETH: ${DEPLOYER_DEST_BALANCE} ETH"
+echo "  Deployer $ORIGIN_CHAIN_NAME USDC:    ${DEPLOYER_ORIGIN_USDC} USDC"
+echo "  Deployer $DEST_CHAIN_NAME USDC: ${DEPLOYER_DEST_USDC} USDC"
 
 # Check solver balances
 echo -e "${YELLOW}3. Checking solver balances...${NC}"
@@ -233,15 +347,15 @@ SOLVER_DEST_BALANCE=$(cast balance $SOLVER_ADDRESS --rpc-url "$DEST_RPC_URL" --e
 SOLVER_ORIGIN_USDC=$(cast call $ORIGIN_USDC_ADDRESS "balanceOf(address)(uint256)" $SOLVER_ADDRESS --rpc-url "$ORIGIN_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
 SOLVER_DEST_USDC=$(cast call $DEST_USDC_ADDRESS "balanceOf(address)(uint256)" $SOLVER_ADDRESS --rpc-url "$DEST_RPC_URL" 2>/dev/null | xargs -I {} cast --to-unit {} 6 2>/dev/null || echo "0")
 
-echo "  Solver Base Sepolia ETH:       ${SOLVER_ORIGIN_BALANCE} ETH"
-echo "  Solver Arbitrum Sepolia ETH:   ${SOLVER_DEST_BALANCE} ETH"
-echo "  Solver Base Sepolia USDC:      ${SOLVER_ORIGIN_USDC} USDC"
-echo "  Solver Arbitrum Sepolia USDC:  ${SOLVER_DEST_USDC} USDC"
+echo "  Solver $ORIGIN_CHAIN_NAME ETH:       ${SOLVER_ORIGIN_BALANCE} ETH"
+echo "  Solver $DEST_CHAIN_NAME ETH:   ${SOLVER_DEST_BALANCE} ETH"
+echo "  Solver $ORIGIN_CHAIN_NAME USDC:      ${SOLVER_ORIGIN_USDC} USDC"
+echo "  Solver $DEST_CHAIN_NAME USDC:  ${SOLVER_DEST_USDC} USDC"
 
 # Check if solver has sufficient balances for operation
 MIN_SOLVER_USDC="1"  # Reduced from 10 to 1 since we're only sending 1 USDC
 if (( $(echo "$SOLVER_DEST_USDC < $MIN_SOLVER_USDC" | bc -l) )); then
-    echo -e "${YELLOW}⚠️  Solver needs USDC on Arbitrum Sepolia to fulfill orders!${NC}"
+    echo -e "${YELLOW}⚠️  Solver needs USDC on $DEST_CHAIN_NAME to fulfill orders!${NC}"
     echo "   Solver address: $SOLVER_ADDRESS"
     echo "   Recommended: at least $MIN_SOLVER_USDC USDC for testing"
     echo "   Send USDC to this address before starting the solver"
@@ -267,8 +381,8 @@ git fetch origin > /dev/null 2>&1
 git checkout ${OIF_PINNED_COMMIT} > /dev/null 2>&1
 echo -e "${GREEN}✓${NC}"
 
-# Deploy contracts on origin chain (Base Sepolia) using deployer key
-echo -e "${BLUE}=== Base Sepolia Deployments ===${NC}"
+# Deploy contracts on origin chain using deployer key
+echo -e "${BLUE}=== $ORIGIN_CHAIN_NAME Deployments ===${NC}"
 
 # Deploy Oracle from actual contract
 echo -n "  Deploying AlwaysYesOracle... "
@@ -298,9 +412,9 @@ if [ -z "$INPUT_SETTLER" ]; then
 fi
 echo -e "${GREEN}✓${NC} $INPUT_SETTLER"
 
-# Deploy OutputSettler on destination chain (Arbitrum Sepolia) using deployer key
+# Deploy OutputSettler on destination chain using deployer key
 echo
-echo -e "${BLUE}=== Arbitrum Sepolia Deployments ===${NC}"
+echo -e "${BLUE}=== $DEST_CHAIN_NAME Deployments ===${NC}"
 
 echo -n "  Deploying OutputSettler... "
 OUTPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/output/coin/OutputSettler7683.sol:OutputInputSettlerEscrow \
@@ -480,12 +594,12 @@ echo -e "${GREEN}✅ Setup complete!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo
 echo -e "${BLUE}🔗 Networks:${NC}"
-echo "  Origin:      Base Sepolia (Chain ID: $ORIGIN_CHAIN_ID)"
-echo "  Destination: Arbitrum Sepolia (Chain ID: $DEST_CHAIN_ID)"
+echo "  Origin:      $ORIGIN_CHAIN_NAME (Chain ID: $ORIGIN_CHAIN_ID)"
+echo "  Destination: $DEST_CHAIN_NAME (Chain ID: $DEST_CHAIN_ID)"
 echo
 echo -e "${BLUE}🌐 RPC Endpoints:${NC}"
-echo "  Base Sepolia:     $ORIGIN_RPC_URL"
-echo "  Arbitrum Sepolia: $DEST_RPC_URL"
+echo "  $ORIGIN_CHAIN_NAME:     $ORIGIN_RPC_URL"
+echo "  $DEST_CHAIN_NAME: $DEST_RPC_URL"
 echo
 echo -e "${BLUE}💎 Asset:${NC}"
 echo "  USDC on both chains"
@@ -493,28 +607,28 @@ echo "  Origin USDC:      $ORIGIN_USDC_ADDRESS"
 echo "  Destination USDC: $DEST_USDC_ADDRESS"
 echo
 echo -e "${BLUE}📋 Contracts:${NC}"
-echo "  Base Sepolia:"
+echo "  $ORIGIN_CHAIN_NAME:"
 echo "    InputSettler: $INPUT_SETTLER"
 echo "    Oracle:       $ORACLE"
 echo "    USDC Token:   $ORIGIN_USDC_ADDRESS"
-echo "  Arbitrum Sepolia:"
+echo "  $DEST_CHAIN_NAME:"
 echo "    OutputSettler: $OUTPUT_SETTLER"
 echo "    USDC Token:    $DEST_USDC_ADDRESS"
 echo
 echo -e "${BLUE}👥 Addresses:${NC}"
-echo "  Deployer (MetaMask): $DEPLOYER_ADDRESS"
+echo "  Deployer: $DEPLOYER_ADDRESS"
 echo "  Solver (Defined):  $SOLVER_ADDRESS"
 echo "  User (Defined):   $USER_ADDRESS"
 echo
 echo -e "${BLUE}💰 Current Balances:${NC}"
-echo "  Deployer Base Sepolia ETH:     ${DEPLOYER_ORIGIN_BALANCE} ETH"
-echo "  Deployer Arbitrum Sepolia ETH: ${DEPLOYER_DEST_BALANCE} ETH"
-echo "  Deployer Base Sepolia USDC:    ${DEPLOYER_ORIGIN_USDC} USDC"
-echo "  Deployer Arbitrum Sepolia USDC: ${DEPLOYER_DEST_USDC} USDC"
-echo "  Solver Base Sepolia ETH:       ${SOLVER_ORIGIN_BALANCE} ETH"
-echo "  Solver Arbitrum Sepolia ETH:   ${SOLVER_DEST_BALANCE} ETH"
-echo "  Solver Base Sepolia USDC:      ${SOLVER_ORIGIN_USDC} USDC"
-echo "  Solver Arbitrum Sepolia USDC:  ${SOLVER_DEST_USDC} USDC"
+echo "  Deployer $ORIGIN_CHAIN_NAME ETH:     ${DEPLOYER_ORIGIN_BALANCE} ETH"
+echo "  Deployer $DEST_CHAIN_NAME ETH: ${DEPLOYER_DEST_BALANCE} ETH"
+echo "  Deployer $ORIGIN_CHAIN_NAME USDC:    ${DEPLOYER_ORIGIN_USDC} USDC"
+echo "  Deployer $DEST_CHAIN_NAME USDC: ${DEPLOYER_DEST_USDC} USDC"
+echo "  Solver $ORIGIN_CHAIN_NAME ETH:       ${SOLVER_ORIGIN_BALANCE} ETH"
+echo "  Solver $DEST_CHAIN_NAME ETH:   ${SOLVER_DEST_BALANCE} ETH"
+echo "  Solver $ORIGIN_CHAIN_NAME USDC:      ${SOLVER_ORIGIN_USDC} USDC"
+echo "  Solver $DEST_CHAIN_NAME USDC:  ${SOLVER_DEST_USDC} USDC"
 echo
 echo -e "${BLUE}📋 Files Created:${NC}"
 echo "  Main Config:    config/testnet.toml"
@@ -527,18 +641,12 @@ echo "  cargo run --bin solver-service -- --config config/testnet.toml"
 echo
 
 echo -e "${BLUE}💡 Next Steps:${NC}"
-echo "  1. SAVE the solver keypair shown above!"
-echo "  2. Fund the solver address with USDC on Arbitrum Sepolia:"
+echo "  1. Fund the solver address with USDC on $DEST_CHAIN_NAME:"
 echo "     Address: $SOLVER_ADDRESS"
 echo "     Recommended: at least $MIN_SOLVER_USDC USDC for testing"
-echo "  3. Ensure you have USDC on Base Sepolia for test transactions (need >1 USDC)"
-echo "  4. VERIFY the USDC token address on Arbitrum Sepolia"
-echo "     Check https://sepolia.arbiscan.io/ for the correct address"
-echo "  5. Start the solver service"
-echo
-echo -e "${BLUE}💡 Getting Testnet USDC:${NC}"
-echo "  Base Sepolia USDC: Bridge from Ethereum Sepolia using https://bridge.base.org/"
-echo "  Arbitrum Sepolia USDC: Bridge from Base/Ethereum using https://bridge.arbitrum.io/"
-echo "  Alternative: Deploy your own test USDC token on Arbitrum Sepolia"
+echo "  2. Ensure you have USDC on $ORIGIN_CHAIN_NAME for test transactions (need >1 USDC)"
+echo "  3. VERIFY the USDC token addresses on both chains"
+echo "     Check $ORIGIN_EXPLORER_URL and $DEST_EXPLORER_URL"
+echo "  4. Start the solver service"
 echo
 echo -e "${GREEN}🎉 Testnet setup completed!${NC}"
