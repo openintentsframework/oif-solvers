@@ -270,9 +270,11 @@ mod tests {
 		#[async_trait::async_trait]
 		impl StorageInterface for Backend {
 			async fn get_bytes(&self, key: &str) -> Result<Vec<u8>, StorageError>;
-			async fn set_bytes(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> Result<(), StorageError>;
+			async fn set_bytes(&self, key: &str, value: Vec<u8>, indexes: Option<solver_storage::StorageIndexes>, ttl: Option<Duration>) -> Result<(), StorageError>;
 			async fn delete(&self, key: &str) -> Result<(), StorageError>;
 			async fn exists(&self, key: &str) -> Result<bool, StorageError>;
+			async fn query(&self, namespace: &str, filter: solver_storage::QueryFilter) -> Result<Vec<String>, StorageError>;
+			async fn get_batch(&self, keys: &[String]) -> Result<Vec<(String, Vec<u8>)>, StorageError>;
 			fn config_schema(&self) -> Box<dyn ConfigSchema>;
 			async fn cleanup_expired(&self) -> Result<usize, StorageError>;
 		}
@@ -294,21 +296,21 @@ mod tests {
 				cleanup_interval_seconds: 60,
 			},
 			delivery: DeliveryConfig {
-				providers: HashMap::new(),
+				implementations: HashMap::new(),
 				min_confirmations: 1,
 			},
 			account: AccountConfig {
-				provider: "local".into(),
-				config: Value::Table(toml::map::Map::new()),
+				primary: "local".into(),
+				implementations: HashMap::new(),
 			},
 			discovery: DiscoveryConfig {
-				sources: HashMap::new(),
+				implementations: HashMap::new(),
 			},
 			order: OrderConfig {
 				implementations: HashMap::new(),
-				execution_strategy: StrategyConfig {
-					strategy_type: "simple".into(),
-					config: Value::Table(toml::map::Map::new()),
+				strategy: StrategyConfig {
+					primary: "simple".into(),
+					implementations: HashMap::new(),
 				},
 			},
 			settlement: SettlementConfig {
@@ -334,10 +336,10 @@ mod tests {
 		let cfg = test_cfg();
 		let storage = Arc::new(solver_storage::StorageService::new(Box::new(storage_mock)));
 		let account = test_account();
-		let providers: HashMap<u64, Box<dyn solver_delivery::DeliveryInterface>> = HashMap::new();
-		let delivery = Arc::new(DeliveryService::new(providers, account.clone(), 1));
-		let discovery = Arc::new(DiscoveryService::new(vec![]));
-		let strategy = create_strategy(&Value::Table(toml::map::Map::new()));
+		let providers: HashMap<u64, Arc<dyn solver_delivery::DeliveryInterface>> = HashMap::new();
+		let delivery = Arc::new(DeliveryService::new(providers, 1));
+		let discovery = Arc::new(DiscoveryService::new(HashMap::new()));
+		let strategy = create_strategy(&Value::Table(toml::map::Map::new())).unwrap();
 		let order = Arc::new(OrderService::new(HashMap::new(), strategy));
 		let settlement = Arc::new(SettlementService::new(HashMap::new()));
 		let event_bus = EventBus::new(64);
@@ -380,6 +382,8 @@ mod tests {
 			}),
 			solver_address: addr(),
 			quote_id: Some("quote-test".into()),
+			input_chain_ids: vec![1],
+			output_chain_ids: vec![2],
 			execution_params: None,
 			prepare_tx_hash: None,
 			fill_tx_hash: Some(TransactionHash(hex::decode(TEST_ADDR).unwrap())),
