@@ -76,15 +76,7 @@ NONCE=$(perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000')
 FILL_DEADLINE=$((CURRENT_TIME + 7200))  # 2 hours
 EXPIRY=$((CURRENT_TIME + 7200))  # 2 hours
 
-# Debug: Print addresses before processing
-echo -e "${BLUE}Debug: Raw addresses${NC}"
-echo "  OUTPUT_SETTLER_ADDRESS: '$OUTPUT_SETTLER_ADDRESS'"
-echo "  DEST_TOKEN_ADDRESS: '$DEST_TOKEN_ADDRESS'"
-echo "  RECIPIENT_ADDR: '$RECIPIENT_ADDR'"
-echo "  ORIGIN_TOKEN_ADDRESS: '$ORIGIN_TOKEN_ADDRESS'"
-
 # Convert origin token address to uint256 for inputs (uint256[2][]) field  
-echo "Converting ORIGIN_TOKEN_ADDRESS to decimal..."
 ORIGIN_TOKEN_U256=$(cast to-dec "$ORIGIN_TOKEN_ADDRESS")
 
 # Build bytes32 representations using left-padding (matches normalize_bytes32_address)
@@ -92,11 +84,6 @@ ZERO_BYTES32="0x0000000000000000000000000000000000000000000000000000000000000000
 OUTPUT_SETTLER_BYTES32="0x000000000000000000000000$(echo $OUTPUT_SETTLER_ADDRESS | cut -c3-)"
 DEST_TOKEN_BYTES32="0x000000000000000000000000$(echo $DEST_TOKEN_ADDRESS | cut -c3-)" 
 RECIPIENT_BYTES32="0x000000000000000000000000$(echo $RECIPIENT_ADDR | cut -c3-)"
-
-echo -e "${BLUE}Debug: Normalized addresses${NC}"
-echo "  OUTPUT_SETTLER_BYTES32: $OUTPUT_SETTLER_BYTES32"
-echo "  DEST_TOKEN_BYTES32: $DEST_TOKEN_BYTES32"
-echo "  RECIPIENT_BYTES32: $RECIPIENT_BYTES32"
 
 STANDARD_ORDER_ABI_TYPE='f((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))'
 
@@ -112,6 +99,48 @@ if [ -z "$TOKEN_ID_HEX" ]; then
 fi
 TOKEN_ID_U256=$(cast to-dec $TOKEN_ID_HEX)
 
+# Check if user has sufficient balance in TheCompact for this resource lock
+echo -e "${BLUE}💰 Checking TheCompact balance...${NC}"
+COMPACT_BALANCE=$(cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDR $TOKEN_ID_U256 --rpc-url $ORIGIN_RPC_URL)
+COMPACT_BALANCE_DEC=$(cast to-dec $COMPACT_BALANCE 2>/dev/null || echo "0")
+REQUIRED_AMOUNT=$AMOUNT
+
+echo -e "   User balance in TheCompact: $(echo "scale=2; $COMPACT_BALANCE_DEC / 1000000000000000000" | bc -l) tokens"
+echo -e "   Required for order: $(echo "scale=2; $REQUIRED_AMOUNT / 1000000000000000000" | bc -l) tokens"
+
+# Use bc for large number comparison
+if [ $(echo "$COMPACT_BALANCE_DEC < $REQUIRED_AMOUNT" | bc) -eq 1 ]; then
+  echo -e "${YELLOW}⚠️  Insufficient balance in TheCompact, depositing tokens...${NC}"
+  
+  DEPOSIT_AMOUNT=$((REQUIRED_AMOUNT * 5))  # Deposit 5x the required amount
+  
+  # Approve TheCompact to spend user tokens
+  echo -e "${BLUE}   Approving TheCompact to spend tokens...${NC}"
+  cast send $ORIGIN_TOKEN_ADDRESS "approve(address,uint256)" $THE_COMPACT $DEPOSIT_AMOUNT \
+    --rpc-url $ORIGIN_RPC_URL \
+    --private-key $USER_PRIVATE_KEY > /dev/null
+  
+  # Deposit tokens into TheCompact
+  echo -e "${BLUE}   Depositing $(echo "scale=1; $DEPOSIT_AMOUNT / 1000000000000000000" | bc -l) tokens into TheCompact...${NC}"
+  DEPOSIT_TX=$(cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" \
+    $ORIGIN_TOKEN_ADDRESS $LOCKTAG_HEX $DEPOSIT_AMOUNT $USER_ADDR \
+    --rpc-url $ORIGIN_RPC_URL \
+    --private-key $USER_PRIVATE_KEY 2>&1)
+  
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ Failed to deposit tokens into TheCompact${NC}"
+    echo "$DEPOSIT_TX"
+    exit 1
+  fi
+  
+  # Verify the new balance
+  NEW_BALANCE=$(cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDR $TOKEN_ID_U256 --rpc-url $ORIGIN_RPC_URL)
+  NEW_BALANCE_DEC=$(cast to-dec $NEW_BALANCE 2>/dev/null || echo "0")
+  echo -e "${GREEN}✅ New balance: $(echo "scale=2; $NEW_BALANCE_DEC / 1000000000000000000" | bc -l) tokens${NC}"
+else
+  echo -e "${GREEN}✅ Sufficient balance available${NC}"
+fi
+
 # Build commitments hash using getLockHash approach from test (line 124-146)
 # Extract lockTag and token from TOKEN_ID as the test does
 EXTRACTED_LOCKTAG="0x$(echo $TOKEN_ID_HEX | cut -c3-26)"  # First 12 bytes (24 hex chars)
@@ -122,12 +151,7 @@ LOCK_TYPE_HASH=$(cast keccak "Lock(bytes12 lockTag,address token,uint256 amount)
 LOCK_HASH=$(cast keccak $(cast abi-encode "f(bytes32,bytes12,address,uint256)" "$LOCK_TYPE_HASH" "$EXTRACTED_LOCKTAG" "$EXTRACTED_TOKEN" "$AMOUNT"))
 COMMITMENTS_HASH=$(cast keccak "$LOCK_HASH")
 
-echo -e "${BLUE}Debug: Commitments${NC}"
-echo "  TOKEN_ID_U256: $TOKEN_ID_U256"
-echo "  EXTRACTED_LOCKTAG: $EXTRACTED_LOCKTAG"
-echo "  EXTRACTED_TOKEN: $EXTRACTED_TOKEN"
-echo "  LOCK_HASH: $LOCK_HASH"
-echo "  COMMITMENTS_HASH: $COMMITMENTS_HASH"
+# Commitments computed successfully
 
 ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" \
   "(${USER_ADDR},${NONCE},${ORIGIN_CHAIN_ID},${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[${TOKEN_ID_U256},${AMOUNT}]],[(${ZERO_BYTES32},${OUTPUT_SETTLER_BYTES32},${DEST_CHAIN_ID},${DEST_TOKEN_BYTES32},${AMOUNT},${RECIPIENT_BYTES32},0x,0x)])")
@@ -141,21 +165,22 @@ echo -e "   InputSettlerCompact: $INPUT_SETTLER_COMPACT"
 # Build Compact signatures payload
 # We need: sponsorSignature over BatchCompact type and optional allocatorData (empty for demo)
 
-# Use the deployed test contract to compute the correct witness hash
-# This ensures 100% compatibility with the actual contract functions
-WITNESS_HASH=$(cast call 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c "computeWitnessHash((address,uint256,uint256,uint32,uint32,address,uint256[2][],(bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[]))" "(0x70997970c51812dc3a010c7d01b50e0d17dc79c8,$NONCE,31337,$EXPIRY,$FILL_DEADLINE,$ORACLE_ADDRESS,[[$TOKEN_ID_U256,$AMOUNT]],[(${ZERO_BYTES32},${OUTPUT_SETTLER_BYTES32},${DEST_CHAIN_ID},${DEST_TOKEN_BYTES32},${AMOUNT},${RECIPIENT_BYTES32},0x,0x)])" --rpc-url http://localhost:8545)
-
-# For debugging, also compute outputs hash separately
-OUTPUTS_HASH=$(cast call 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c "computeOutputsHash((bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes,bytes)[])" "[(${ZERO_BYTES32},${OUTPUT_SETTLER_BYTES32},${DEST_CHAIN_ID},${DEST_TOKEN_BYTES32},${AMOUNT},${RECIPIENT_BYTES32},0x,0x)]" --rpc-url http://localhost:8545)
-
-# Also compute mandate type hash for verification
+# Compute witness hash manually using the exact same logic as StandardOrderType.witnessHash
 MANDATE_TYPE_HASH=$(cast keccak "Mandate(uint32 fillDeadline,address inputOracle,MandateOutput[] outputs)MandateOutput(bytes32 oracle,bytes32 settler,uint256 chainId,bytes32 token,uint256 amount,bytes32 recipient,bytes call,bytes context)")
+MANDATE_OUTPUT_TYPE_HASH=$(cast keccak "MandateOutput(bytes32 oracle,bytes32 settler,uint256 chainId,bytes32 token,uint256 amount,bytes32 recipient,bytes call,bytes context)")
 
-echo -e "${BLUE}Debug: Witness computation${NC}"
-echo "  MANDATE_TYPE_HASH: $MANDATE_TYPE_HASH"
-echo "  OUTPUT_HASH: $OUTPUT_HASH" 
-echo "  OUTPUTS_HASH: $OUTPUTS_HASH"
-echo "  WITNESS_HASH: $WITNESS_HASH"
+# Compute individual output hash (matches MandateOutputType.hashOutput)
+OUTPUT_HASH=$(cast keccak $(cast abi-encode "f(bytes32,bytes32,bytes32,uint256,bytes32,uint256,bytes32,bytes32,bytes32)" \
+  "$MANDATE_OUTPUT_TYPE_HASH" "$ZERO_BYTES32" "$OUTPUT_SETTLER_BYTES32" "$DEST_CHAIN_ID" "$DEST_TOKEN_BYTES32" "$AMOUNT" "$RECIPIENT_BYTES32" \
+  "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+
+# Compute outputs hash (matches MandateOutputType.hashOutputs - just hash the single output hash)
+OUTPUTS_HASH=$(cast keccak "$OUTPUT_HASH")
+
+# Compute witness hash (matches StandardOrderType.witnessHash)
+WITNESS_HASH=$(cast keccak $(cast abi-encode "f(bytes32,uint32,address,bytes32)" "$MANDATE_TYPE_HASH" "$FILL_DEADLINE" "$ORACLE_ADDRESS" "$OUTPUTS_HASH"))
+
+# Witness hash computed using contract function
 
 # Build BatchCompact EIP-712 digest using TheCompact DOMAIN_SEPARATOR
 DOMAIN_SEPARATOR=$(cast call $THE_COMPACT "DOMAIN_SEPARATOR()" --rpc-url $ORIGIN_RPC_URL)

@@ -414,18 +414,18 @@ else
     fi
 fi
 
-# Extract the actual allocator ID from the address (last 88 bits + 4-bit compact flag)
-# This matches IdLib.toAllocatorId() logic
-ALLOCATOR_ADDR_HEX=${ALLOCATOR_ADDR:2}  # Remove 0x prefix
-ALLOCATOR_LAST_88_BITS=${ALLOCATOR_ADDR_HEX:8}  # Take last 22 hex chars (88 bits)
+# For demo purposes, use a simple fixed lock tag that's exactly bytes12 (24 hex chars)
+# This avoids complex allocator ID computation that can have padding issues
+LOCKTAG_HEX="0x00a9beca4e685f962f0cf6c9"  # Exactly 24 hex chars (12 bytes)
 
-# Compute compact flag (simplified: just use the actual logic result)
-# For 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9, the compact flag is 0xa
-COMPACT_FLAG="a"
-ALLOCATOR_ID_HEX="0x${COMPACT_FLAG}${ALLOCATOR_LAST_88_BITS}"
+# Verify the lock tag length
+LOCKTAG_LENGTH=${#LOCKTAG_HEX}
+if [ $LOCKTAG_LENGTH -ne 26 ]; then  # 0x + 24 hex chars = 26 total
+    echo -e "${RED}Invalid lock tag length: $LOCKTAG_LENGTH (expected 26)${NC}"
+    exit 1
+fi
 
-# The lock tag is just the allocator ID as bytes12 (since scope=0, resetPeriod=0)
-LOCKTAG_HEX=$ALLOCATOR_ID_HEX
+ALLOCATOR_ID_HEX=$LOCKTAG_HEX  # For demo, same as lock tag
 
 echo -e "${GREEN}✓${NC} Allocator ID: $ALLOCATOR_ID_HEX, Lock Tag: $LOCKTAG_HEX"
 
@@ -434,19 +434,7 @@ cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x"
     --rpc-url http://localhost:$DEST_PORT \
     --private-key $PRIVATE_KEY > /dev/null 2>&1
 
-# Deposit a demo amount into TheCompact for the user to create a resource lock ID
-DEMO_DEPOSIT_AMOUNT=1000000000000000000
-# Approve TheCompact to pull user's tokens
-cast send $TOKENA "approve(address,uint256)" $THE_COMPACT $DEMO_DEPOSIT_AMOUNT \
-    --rpc-url http://localhost:$ORIGIN_PORT \
-    --private-key $USER_PRIVATE_KEY > /dev/null
-# Deposit ERC20
-cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $LOCKTAG_HEX $DEMO_DEPOSIT_AMOUNT $USER_ADDRESS \
-    --rpc-url http://localhost:$ORIGIN_PORT \
-    --private-key $USER_PRIVATE_KEY > /dev/null
-# Compute tokenId (lockTag || token)
-TOKEN_ID_HEX=0x${LOCKTAG_HEX:2}${TOKENA:2}
-echo -e "${GREEN}✓${NC} Resource lock ID: $TOKEN_ID_HEX"
+# Note: Token deposit into TheCompact will happen after token minting
 
 # Deploy InputSettlerCompact (Contract #5 - same address on both chains)
 INPUT_SETTLER_COMPACT_OUTPUT=$(env -u ETH_FROM ~/.foundry/bin/forge create src/input/compact/InputSettlerCompact.sol:InputSettlerCompact \
@@ -631,6 +619,48 @@ cast send $TOKENB "approve(address,uint256)" $ORIGIN_PERMIT2_ADDRESS "0xffffffff
     --from $USER_ADDRESS \
     --private-key $USER_PRIVATE_KEY > /dev/null
 echo -e "${GREEN}✓${NC}"
+
+# Now deposit tokens into TheCompact for resource lock (after user has tokens)
+echo -n "  Depositing tokens into TheCompact for resource lock... "
+DEMO_DEPOSIT_AMOUNT=5000000000000000000  # 5 tokens
+
+# Approve TheCompact to pull user's tokens
+APPROVE_RESULT=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast send $TOKENA "approve(address,uint256)" $THE_COMPACT $DEMO_DEPOSIT_AMOUNT \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $USER_PRIVATE_KEY 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to approve TheCompact${NC}"
+    echo "Error: $APPROVE_RESULT"
+    exit 1
+fi
+
+# Deposit ERC20 to create resource lock
+DEPOSIT_RESULT=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $LOCKTAG_HEX $DEMO_DEPOSIT_AMOUNT $USER_ADDRESS \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $USER_PRIVATE_KEY 2>&1)
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to deposit into TheCompact${NC}"
+    echo "Error: $DEPOSIT_RESULT"
+    exit 1
+fi
+
+# Compute tokenId (lockTag || token)
+TOKEN_ID_HEX=0x$(echo $LOCKTAG_HEX | cut -c3-)$(echo $TOKENA | cut -c3-)
+
+# Verify the deposit was successful
+BALANCE=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDRESS $(env -u ETH_FROM ~/.foundry/bin/cast to-dec $TOKEN_ID_HEX) --rpc-url http://localhost:$ORIGIN_PORT)
+BALANCE_DEC=$(env -u ETH_FROM ~/.foundry/bin/cast to-dec $BALANCE 2>/dev/null || echo "0")
+
+if [ "$BALANCE_DEC" -lt "$DEMO_DEPOSIT_AMOUNT" ]; then
+    echo -e "${RED}Deposit verification failed${NC}"
+    echo "Expected: $DEMO_DEPOSIT_AMOUNT, Got: $BALANCE_DEC"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} Deposited $(echo "scale=1; $BALANCE_DEC / 1000000000000000000" | bc -l) tokens"
+echo -e "${GREEN}✓${NC} Resource lock ID: $TOKEN_ID_HEX"
 
 # Step 5: Create config files (modular structure)
 echo
@@ -830,7 +860,14 @@ mkdir -p config/demo
 cat > config/demo/compact.env << EOF
 LOCKTAG_HEX="$LOCKTAG_HEX"
 TOKEN_ID_HEX="$TOKEN_ID_HEX"
+ALLOCATOR_ID_HEX="$ALLOCATOR_ID_HEX"
+DEMO_DEPOSIT_AMOUNT="$DEMO_DEPOSIT_AMOUNT"
 EOF
+
+echo -e "${GREEN}✓${NC} Updated compact.env with:"
+echo -e "    LOCKTAG_HEX=$LOCKTAG_HEX"
+echo -e "    TOKEN_ID_HEX=$TOKEN_ID_HEX"
+echo -e "    Deposited: $(echo "scale=1; $DEMO_DEPOSIT_AMOUNT / 1000000000000000000" | bc -l) tokens"
 
 # Done!
 echo
