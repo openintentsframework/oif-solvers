@@ -16,7 +16,12 @@ struct PricingConfig {
 
 impl PricingConfig {
     fn from_config(config: &Config) -> Self {
-        let table = &config.order.execution_strategy.config;
+        // Try to get the config table from the primary strategy implementation
+        let strategy_name = &config.order.strategy.primary;
+        let default_table = toml::Value::Table(toml::map::Map::new());
+        let table = config.order.strategy.implementations
+            .get(strategy_name)
+            .unwrap_or(&default_table);
         Self {
             currency: table
                 .get("pricing_currency")
@@ -67,7 +72,7 @@ impl CostEngine {
         if pricing.enable_live_gas_estimate {
         if let Some(tx) = build_dest_fill_tx(&quote.details, dest_chain_id, &solver.config().networks) {
             tracing::info!("Estimating fill gas on destination chain");
-            match solver.estimate_gas(dest_chain_id, tx.clone()).await {
+            match solver.delivery().estimate_gas(dest_chain_id, tx.clone()).await {
                 Ok(g) => {
                     tracing::info!("Fill gas units: {}", g);
                     fill_units = g;
@@ -88,7 +93,7 @@ impl CostEngine {
         if let Some(tx) = build_origin_finalize_tx(&quote.details, origin_chain_id, &solver.config().networks) {
             tracing::info!("Estimating claim gas on origin chain");
             tracing::debug!("finalise tx bytes_len={} to={}", tx.data.len(), tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()));
-            match solver.estimate_gas(origin_chain_id, tx.clone()).await {
+            match solver.delivery().estimate_gas(origin_chain_id, tx.clone()).await {
                 Ok(g) => {
                     tracing::info!("Claim gas units: {}", g);
                     claim_units = g;
@@ -107,7 +112,8 @@ impl CostEngine {
         // Gas prices
         let origin_gp = U256::from_str_radix(
             &solver
-                .chain_data(origin_chain_id)
+                .delivery()
+                .get_chain_data(origin_chain_id)
                 .await
                 .map_err(|e| QuoteError::Internal(e.to_string()))?
                 .gas_price,
@@ -116,7 +122,8 @@ impl CostEngine {
         .unwrap_or(U256::from(1_000_000_000u64));
         let dest_gp = U256::from_str_radix(
             &solver
-                .chain_data(dest_chain_id)
+                .delivery()
+                .get_chain_data(dest_chain_id)
                 .await
                 .map_err(|e| QuoteError::Internal(e.to_string()))?
                 .gas_price,

@@ -57,8 +57,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use solver_types::{
-	standards::eip7683::MandateOutput, with_0x_prefix, ConfigSchema, Eip7683OrderData, Field,
-	FieldType, Intent, IntentMetadata, NetworksConfig, Schema,
+	current_timestamp,
+	standards::eip7683::{GasLimitOverrides, MandateOutput},
+	with_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, ImplementationRegistry,
+	Intent, IntentMetadata, NetworksConfig, Schema,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -66,17 +68,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::CorsLayer;
-
-/// Helper function to get current timestamp, returns 0 if system time is before UNIX epoch.
-///
-/// This function safely retrieves the current UNIX timestamp in seconds,
-/// returning 0 if the system time is somehow before the UNIX epoch.
-fn current_timestamp() -> u64 {
-	std::time::SystemTime::now()
-		.duration_since(std::time::UNIX_EPOCH)
-		.map(|d| d.as_secs())
-		.unwrap_or(0)
-}
 
 // Import the Solidity types for the OIF contracts
 sol! {
@@ -302,7 +293,13 @@ impl Eip7683OffchainDiscovery {
 		let mut providers = HashMap::new();
 		for network_id in &network_ids {
 			if let Some(network) = networks.get(network_id) {
-				let provider = RootProvider::new_http(network.rpc_url.parse().map_err(|e| {
+				let http_url = network.get_http_url().ok_or_else(|| {
+					DiscoveryError::Connection(format!(
+						"No HTTP RPC URL configured for network {}",
+						network_id
+					))
+				})?;
+				let provider = RootProvider::new_http(http_url.parse().map_err(|e| {
 					DiscoveryError::Connection(format!(
 						"Invalid RPC URL for network {}: {}",
 						network_id, e
@@ -490,8 +487,7 @@ impl Eip7683OffchainDiscovery {
 			input_oracle: with_0x_prefix(&hex::encode(order.inputOracle)),
 			inputs: order.inputs.clone(),
 			order_id,
-			settle_gas_limit: 200_000u64, // TODO: calculate exactly
-			fill_gas_limit: 200_000u64,   // TODO: calculate exactly
+			gas_limit_overrides: GasLimitOverrides::default(),
 			outputs: order
 				.outputs
 				.iter()
@@ -743,18 +739,6 @@ async fn handle_intent_submission(
 	}
 }
 
-/// Configuration schema for EIP-7683 offchain discovery.
-///
-/// Defines and validates the configuration parameters required
-/// for the off-chain discovery service. This schema ensures
-/// all required fields are present and have valid values.
-///
-/// # Required Fields
-///
-/// - `api_port` - Port number (1-65535)
-/// - `api_host` - Host address string
-/// - `rpc_url` - HTTP(S) URL for Ethereum RPC
-///
 /// Configuration schema for EIP-7683 off-chain discovery service.
 ///
 /// This schema validates the configuration for the off-chain discovery API,
@@ -762,14 +746,13 @@ async fn handle_intent_submission(
 ///
 /// # Required Fields
 ///
+/// - `api_host` - Host address for the API server (e.g., "127.0.0.1" or "0.0.0.0")
 /// - `api_port` - Port number for the API server (1-65535)
-/// - `api_host` - Host address for the API server
-/// - `rpc_url` - Ethereum RPC URL for contract interactions
+/// - `network_ids` - List of network IDs this discovery service monitors
 ///
 /// # Optional Fields
 ///
-/// - `auth_token` - Authentication token string
-/// - `rate_limit` - Request rate limit (1-10000)
+/// - `auth_token` - Authentication token string for API access
 pub struct Eip7683OffchainDiscoverySchema;
 
 impl Eip7683OffchainDiscoverySchema {
@@ -785,6 +768,7 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 		let schema = Schema::new(
 			// Required fields
 			vec![
+				Field::new("api_host", FieldType::String),
 				Field::new(
 					"api_port",
 					FieldType::Integer {
@@ -792,11 +776,6 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 						max: Some(65535),
 					},
 				),
-				Field::new("api_host", FieldType::String),
-			],
-			// Optional fields
-			vec![
-				Field::new("auth_token", FieldType::String),
 				Field::new(
 					"network_ids",
 					FieldType::Array(Box::new(FieldType::Integer {
@@ -804,6 +783,10 @@ impl ConfigSchema for Eip7683OffchainDiscoverySchema {
 						max: None,
 					})),
 				),
+			],
+			// Optional fields
+			vec![
+				Field::new("auth_token", FieldType::String),
 				Field::new(
 					"rate_limit",
 					FieldType::Integer {
@@ -873,6 +856,10 @@ impl DiscoveryInterface for Eip7683OffchainDiscovery {
 
 		self.is_running.store(false, Ordering::SeqCst);
 		Ok(())
+	}
+
+	fn get_url(&self) -> Option<String> {
+		Some(format!("{}:{}", self.api_host, self.api_port))
 	}
 }
 
@@ -952,3 +939,17 @@ pub fn create_discovery(
 
 	Ok(Box::new(discovery))
 }
+
+/// Registry for the offchain EIP-7683 discovery implementation.
+pub struct Registry;
+
+impl ImplementationRegistry for Registry {
+	const NAME: &'static str = "offchain_eip7683";
+	type Factory = crate::DiscoveryFactory;
+
+	fn factory() -> Self::Factory {
+		create_discovery
+	}
+}
+
+impl crate::DiscoveryRegistry for Registry {}

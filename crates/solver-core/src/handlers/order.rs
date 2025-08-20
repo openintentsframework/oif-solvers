@@ -79,7 +79,7 @@ impl OrderHandler {
 			// Submit prepare transaction
 			let prepare_tx_hash = self
 				.delivery
-				.deliver(prepare_tx)
+				.deliver(prepare_tx.clone())
 				.await
 				.map_err(|e| OrderError::Service(e.to_string()))?;
 
@@ -88,6 +88,7 @@ impl OrderHandler {
 					order_id: order.id.clone(),
 					tx_hash: prepare_tx_hash.clone(),
 					tx_type: TransactionType::Prepare,
+					tx_chain_id: prepare_tx.chain_id,
 				}))
 				.ok();
 
@@ -97,6 +98,7 @@ impl OrderHandler {
 					StorageKey::OrderByTxHash.as_str(),
 					&hex::encode(&prepare_tx_hash.0),
 					&order.id,
+					None,
 				)
 				.await
 				.map_err(|e| OrderError::Storage(e.to_string()))?;
@@ -148,7 +150,7 @@ impl OrderHandler {
 		// Submit transaction
 		let tx_hash = self
 			.delivery
-			.deliver(tx)
+			.deliver(tx.clone())
 			.await
 			.map_err(|e| OrderError::Service(e.to_string()))?;
 
@@ -157,6 +159,7 @@ impl OrderHandler {
 				order_id: order.id.clone(),
 				tx_hash: tx_hash.clone(),
 				tx_type: TransactionType::Fill,
+				tx_chain_id: tx.chain_id,
 			}))
 			.ok();
 
@@ -172,6 +175,7 @@ impl OrderHandler {
 				StorageKey::OrderByTxHash.as_str(),
 				&hex::encode(&tx_hash.0),
 				&order.id,
+				None,
 			)
 			.await
 			.map_err(|e| OrderError::Storage(e.to_string()))?;

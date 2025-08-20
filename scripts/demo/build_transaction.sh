@@ -136,4 +136,4 @@ else
   exit 1
 fi
 
-echo -e "${GREEN}🎉 Done${NC}"
+echo -e "${GREEN}🎉 Transaction built${NC}"
