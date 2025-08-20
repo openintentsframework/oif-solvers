@@ -41,7 +41,7 @@ private_key = "solver_private_key"
 min_confirmations = 3  # Higher confirmations for testnets
 
 [delivery.implementations.evm_alloy]
-network_ids = [84532, 421614]
+network_ids = [84532, 11155420, 421614, 11155111]
 
 # ============================================================================
 # DISCOVERY
@@ -49,12 +49,12 @@ network_ids = [84532, 421614]
 [discovery]
 
 [discovery.implementations.onchain_eip7683]
-network_ids = [84532, 421614]
+network_ids = [84532, 11155420, 421614, 11155111]
 
 [discovery.implementations.offchain_eip7683]
 api_host = "127.0.0.1"
 api_port = 8081
-network_ids = [84532]
+network_ids = [84532, 11155420, 421614, 11155111]
 
 # ============================================================================
 # ORDER
@@ -78,11 +78,11 @@ max_gas_price_gwei = 100
 chain_id = 1
 address = "0xB686e4A97821E259d1BB15c5bf13ec96553176d7"
 
-[settlement.implementations.eip7683]
-network_ids = [84532, 421614]
-oracle_addresses = { 84532 = "0x5D2b783220a8391Df65bed8D1544dAF3c29A6d42", 421614 = "0x5D2b783220a8391Df65bed8D1544dAF3c29A6d42" }
+[settlement.implementations.direct]
+order = "eip7683"
+network_ids = [84532, 11155420, 421614, 11155111]
+oracle_addresses = { 11155420 = "0x6dc56CB6C61f3c5a9148cE1fD1AF7a13B8903980", 84532 = "0xDD40C9a79D813e4200795014b8E9e575317596F6", 421614 = "0xedF6cd53008C3EA43e976214F5f6a1A8dBDc6460", 11155111 = "0xc04c8A84295F36B53AC109d47C041a258B788268" }
 dispute_period_seconds = 60
-
 
 # ============================================================================
 # DEMO SCRIPT CONFIGURATION
@@ -97,12 +97,12 @@ USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 
 [contracts.destination]
-USDC = "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+USDC = " 0x5fd84259d66Cd46123540766Be93DFE6D43130D7"
 permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 
 # Test accounts (used by demo scripts)
 [accounts]
-solver = "solver_address"
-user = "user_address"
+solver = "0xbe2D5EBF89baD8f8c92ED2382c16ECB90DD37be2"
+user = "0xf1828Ea4C9480F87620E538c80b6134A2e611ea9"
 user_private_key = "user_private_key"
-recipient = "recipient_address"
+recipient = "0x40C93020a2964dc79456443B938D0cA556117317"
