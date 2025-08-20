@@ -395,39 +395,52 @@ echo -e "${GREEN}✓${NC} $ALLOCATOR_ADDR"
 # Register allocator with TheCompact on both chains
 echo -n "  Registering AlwaysOKAllocator with TheCompact... "
 
-# Register the allocator on origin chain
-REG_TX=$(cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
+# Register the allocator on origin chain 
+REGISTRATION_OUTPUT=$(cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
     --rpc-url http://localhost:$ORIGIN_PORT \
     --private-key $PRIVATE_KEY 2>&1)
+
+echo "REGISTRATION_OUTPUT: $REGISTRATION_OUTPUT"
 
 # Check if registration succeeded or if allocator was already registered
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Allocator registered successfully"
 else
     # Check if it failed because allocator is already registered
-    if echo "$REG_TX" | grep -q "AllocatorAlreadyRegistered"; then
+    if echo "$REGISTRATION_OUTPUT" | grep -q "AllocatorAlreadyRegistered"; then
         echo -e "${GREEN}✓${NC} Allocator already registered"
     else
         echo -e "${RED}❌ Registration failed${NC}"
-        echo "$REG_TX"
+        echo "$REGISTRATION_OUTPUT"
         exit 1
     fi
 fi
 
-# For demo purposes, use a simple fixed lock tag that's exactly bytes12 (24 hex chars)
-# This avoids complex allocator ID computation that can have padding issues
-LOCKTAG_HEX="0x00a9beca4e685f962f0cf6c9"  # Exactly 24 hex chars (12 bytes)
+# Extract the allocator ID from the registration logs (like the test file does)
+# The AllocatorRegistered event has: allocatorId (uint96) + allocatorAddress (address)
+# Get the allocator ID from the event data (first 64 hex chars, take last 24)
+ALLOCATOR_ID_FROM_LOGS=$(echo "$REGISTRATION_OUTPUT" | grep -o '"data":"0x[^"]*"' | sed 's/"data":"0x//' | sed 's/"//' | cut -c41-64)
+
+if [ -n "$ALLOCATOR_ID_FROM_LOGS" ] && [ ${#ALLOCATOR_ID_FROM_LOGS} -eq 24 ]; then
+    # This is the bytes12 representation directly from the event logs
+    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x${ALLOCATOR_ID_FROM_LOGS}"
+    echo "Extracted allocator ID from logs: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
+else
+    echo -e "${YELLOW}Could not extract from logs, using hardcoded value${NC}"
+    # Fall back to your original working value
+    ALWAYS_OK_ALLOCATOR_LOCK_TAG="0x00a9beca4e685f962f0cf6c9"
+fi
 
 # Verify the lock tag length
-LOCKTAG_LENGTH=${#LOCKTAG_HEX}
+LOCKTAG_LENGTH=${#ALWAYS_OK_ALLOCATOR_LOCK_TAG}
 if [ $LOCKTAG_LENGTH -ne 26 ]; then  # 0x + 24 hex chars = 26 total
     echo -e "${RED}Invalid lock tag length: $LOCKTAG_LENGTH (expected 26)${NC}"
     exit 1
 fi
 
-ALLOCATOR_ID_HEX=$LOCKTAG_HEX  # For demo, same as lock tag
+ALLOCATOR_ID_HEX=$ALWAYS_OK_ALLOCATOR_LOCK_TAG
 
-echo -e "${GREEN}✓${NC} Allocator ID: $ALLOCATOR_ID_HEX, Lock Tag: $LOCKTAG_HEX"
+echo -e "${GREEN}✓${NC} Allocator ID: $ALLOCATOR_ID_HEX, Lock Tag: $ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 
 # Also register on destination chain for consistency
 cast send $THE_COMPACT "__registerAllocator(address,bytes)" $ALLOCATOR_ADDR "0x" \
@@ -636,7 +649,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Deposit ERC20 to create resource lock
-DEPOSIT_RESULT=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $LOCKTAG_HEX $DEMO_DEPOSIT_AMOUNT $USER_ADDRESS \
+DEPOSIT_RESULT=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast send $THE_COMPACT "depositERC20(address,bytes12,uint256,address)" $TOKENA $ALWAYS_OK_ALLOCATOR_LOCK_TAG $DEMO_DEPOSIT_AMOUNT $USER_ADDRESS \
     --rpc-url http://localhost:$ORIGIN_PORT \
     --private-key $USER_PRIVATE_KEY 2>&1)
 
@@ -647,7 +660,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Compute tokenId (lockTag || token)
-TOKEN_ID_HEX=0x$(echo $LOCKTAG_HEX | cut -c3-)$(echo $TOKENA | cut -c3-)
+TOKEN_ID_HEX=0x$(echo $ALWAYS_OK_ALLOCATOR_LOCK_TAG | cut -c3-)$(echo $TOKENA | cut -c3-)
 
 # Verify the deposit was successful
 BALANCE=$(env -u ETH_FROM -u ETH_KEYSTORE_DIR -u ETH_KEYSTORE_PASSWORD_FILE ~/.foundry/bin/cast call $THE_COMPACT "balanceOf(address,uint256)" $USER_ADDRESS $(env -u ETH_FROM ~/.foundry/bin/cast to-dec $TOKEN_ID_HEX) --rpc-url http://localhost:$ORIGIN_PORT)
@@ -858,14 +871,14 @@ echo -e "    - config/demo/api.toml (API server settings)"
 # After configs are written, also generate a compact.env for the send script
 mkdir -p config/demo
 cat > config/demo/compact.env << EOF
-LOCKTAG_HEX="$LOCKTAG_HEX"
+ALWAYS_OK_ALLOCATOR_LOCK_TAG="$ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 TOKEN_ID_HEX="$TOKEN_ID_HEX"
 ALLOCATOR_ID_HEX="$ALLOCATOR_ID_HEX"
 DEMO_DEPOSIT_AMOUNT="$DEMO_DEPOSIT_AMOUNT"
 EOF
 
 echo -e "${GREEN}✓${NC} Updated compact.env with:"
-echo -e "    LOCKTAG_HEX=$LOCKTAG_HEX"
+echo -e "    ALWAYS_OK_ALLOCATOR_LOCK_TAG=$ALWAYS_OK_ALLOCATOR_LOCK_TAG"
 echo -e "    TOKEN_ID_HEX=$TOKEN_ID_HEX"
 echo -e "    Deposited: $(echo "scale=1; $DEMO_DEPOSIT_AMOUNT / 1000000000000000000" | bc -l) tokens"
 
