@@ -107,7 +107,7 @@ deploy_permit2() {
     local permit2_code=$(cast code $permit2_address --rpc-url $rpc_url 2>&1)
     if [ "$permit2_code" = "0x" ] || [ -z "$permit2_code" ]; then
         # Get Permit2 bytecode from mainnet
-        local mainnet_permit2_code=$(cast code $permit2_address --rpc-url https://eth.llamarpc.com 2>/dev/null | grep "^0x" | head -n1)
+        local mainnet_permit2_code=$(cast code $permit2_address --rpc-url https://ethereum-rpc.publicnode.com 2>/dev/null | grep "^0x" | head -n1)
         
         if [ ! -z "$mainnet_permit2_code" ] && [ "$mainnet_permit2_code" != "0x" ]; then
             # Deploy using mainnet bytecode
