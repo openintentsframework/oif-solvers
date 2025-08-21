@@ -238,6 +238,26 @@ impl OrderInterface for Eip7683OrderImpl {
 				))
 			})?;
 
+		// Early validation: Check if the specific routes exist
+		let supported_destinations: std::collections::HashSet<u64> =
+			supported_outputs.iter().map(|info| info.chain_id).collect();
+
+		for output in &order_data.outputs {
+			let dest_chain = output.chain_id.to::<u64>();
+
+			// Skip same-chain outputs as they don't need cross-chain routes
+			if dest_chain == origin_chain {
+				continue;
+			}
+
+			if !supported_destinations.contains(&dest_chain) {
+				return Err(OrderError::ValidationFailed(format!(
+					"Route from chain {} to chain {} is not supported (oracle {} has no route to destination)",
+					origin_chain, dest_chain, order_data.input_oracle
+				)));
+			}
+		}
+
 		// Validate each output oracle
 		for output in &order_data.outputs {
 			let dest_chain = output.chain_id.to::<u64>();

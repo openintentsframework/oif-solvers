@@ -267,7 +267,10 @@ impl SettlementService {
 						}
 					}
 
-					supported_routes.insert(input_info, valid_outputs);
+					// Only insert if there are valid routes from this input oracle
+					if !valid_outputs.is_empty() {
+						supported_routes.insert(input_info, valid_outputs);
+					}
 				}
 			}
 		}
