@@ -306,7 +306,7 @@ pub(crate) fn resolve_env_vars(input: &str) -> Result<String, ConfigError> {
 						var_name
 					)));
 				}
-			}
+			},
 		};
 
 		replacements.push((full_match.start(), full_match.end(), value));
