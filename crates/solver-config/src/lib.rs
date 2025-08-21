@@ -897,7 +897,9 @@ network_ids = [1, 2, 999]  # Network 999 doesn't exist
 		let result = Config::from_str(config_str);
 		assert!(result.is_err());
 		let err = result.unwrap_err();
-		assert!(err.to_string().contains("references network 999 which doesn't exist"));
+		assert!(err
+			.to_string()
+			.contains("references network 999 which doesn't exist"));
 	}
 
 	#[test]
