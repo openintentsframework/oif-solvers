@@ -37,10 +37,10 @@
 //! - Permit2 availability (universal but requires deployment)
 //! - Custom protocol support (token-specific features)
 
-use solver_types::{AvailableInput, LockKind as ApiLockKind, QuoteError, Address};
-use std::collections::HashMap;
-use super::registry::{PROTOCOL_REGISTRY, TokenCapabilities};
+use super::registry::{TokenCapabilities, PROTOCOL_REGISTRY};
 use alloy_primitives::hex;
+use solver_types::{Address, AvailableInput, LockKind as ApiLockKind, QuoteError};
+use std::collections::HashMap;
 
 /// Types of resource locks supported
 #[derive(Debug, Clone)]
@@ -180,7 +180,7 @@ impl CustodyStrategy {
 
 		let permit2_hex = "000000000022D473030F116dDEE9F6B43aC78BA3";
 		let permit2_bytes = hex::decode(permit2_hex).expect("Valid Permit2 address");
-		
+
 		// Ethereum Mainnet
 		addresses.insert(1, Address(permit2_bytes.clone()));
 		// Polygon

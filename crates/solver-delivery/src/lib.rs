@@ -340,6 +340,6 @@ impl DeliveryService {
 			.get(&chain_id)
 			.ok_or(DeliveryError::NoImplementationAvailable)?;
 
-			implementation.estimate_gas(tx).await
+		implementation.estimate_gas(tx).await
 	}
 }

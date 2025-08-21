@@ -271,6 +271,7 @@ pricing_currency = "USDC"          # Display currency for quote cost breakdowns
 commission_bps = 20                 # 0.20% commission applied over subtotal
 gas_buffer_bps = 1000               # +10% buffer over estimated gas costs
 rate_buffer_bps = 14                # +0.14% buffer over base price for rate movement
+enable_live_gas_estimate = false   # Set to true to use live gas estimation (requires RPC access)
 
 # Settlement configuration
 [settlement]

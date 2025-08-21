@@ -233,10 +233,12 @@ pub fn resolve_permit2_address(config: &Config, chain_id: u64) -> Result<AlloyAd
 	let solver_address = map.get(&chain_id).ok_or_else(|| {
 		QuoteError::InvalidRequest(format!("No default Permit2 address for chain {}", chain_id))
 	})?;
-	
+
 	// Convert solver_types::Address to alloy_primitives::Address
 	if solver_address.0.len() != 20 {
-		return Err(QuoteError::InvalidRequest("Invalid address length".to_string()));
+		return Err(QuoteError::InvalidRequest(
+			"Invalid address length".to_string(),
+		));
 	}
 	let mut addr_bytes = [0u8; 20];
 	addr_bytes.copy_from_slice(&solver_address.0);

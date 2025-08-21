@@ -460,13 +460,13 @@ impl DeliveryInterface for AlloyDelivery {
 	async fn estimate_gas(&self, tx: SolverTransaction) -> Result<u64, DeliveryError> {
 		// Get the chain ID from the transaction
 		let chain_id = tx.chain_id;
-		
+
 		// Get the appropriate provider for this chain
 		let provider = self.get_provider(chain_id)?;
-		
+
 		// Convert to TransactionRequest
 		let request: TransactionRequest = tx.into();
-		
+
 		// The provider with wallet will automatically handle setting the `from` field
 		// when needed for gas estimation
 		let gas = provider
