@@ -2,8 +2,7 @@ use alloy_primitives::U256;
 use solver_config::Config;
 use solver_core::SolverEngine;
 use solver_types::{CostComponent, Quote, QuoteCost, QuoteError, QuoteOrder, SignatureType};
-
-use super::tx_builders::{build_dest_fill_tx, build_origin_finalize_tx};
+use solver_types::{ExecutionParams, FillProof, Order, OrderStatus, Transaction, Address, TransactionHash};
 
 #[derive(Debug, Clone)]
 struct PricingConfig {
@@ -70,44 +69,46 @@ impl CostEngine {
 
         // Try live estimate for fill on destination chain
         if pricing.enable_live_gas_estimate {
-        if let Some(tx) = build_dest_fill_tx(&quote.details, dest_chain_id, &solver.config().networks) {
-            tracing::info!("Estimating fill gas on destination chain");
-            match solver.delivery().estimate_gas(dest_chain_id, tx.clone()).await {
-                Ok(g) => {
-                    tracing::info!("Fill gas units: {}", g);
-                    fill_units = g;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        chain = dest_chain_id,
-                        to = %tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()),
-                        "estimate_gas(fill) failed; using heuristic"
-                    );
+            if let Ok(tx) = self.build_fill_tx_for_estimation(quote, dest_chain_id, solver).await {
+                tracing::info!("Estimating fill gas on destination chain");
+                match solver.delivery().estimate_gas(dest_chain_id, tx.clone()).await {
+                    Ok(g) => {
+                        tracing::info!("Fill gas units: {}", g);
+                        fill_units = g;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            chain = dest_chain_id,
+                            to = %tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()),
+                            "estimate_gas(fill) failed; using heuristic"
+                        );
+                    }
                 }
             }
-        }}
+        }
 
         // Try live estimate for claim (finalise) on origin chain
         if pricing.enable_live_gas_estimate {
-        if let Some(tx) = build_origin_finalize_tx(&quote.details, origin_chain_id, &solver.config().networks) {
-            tracing::info!("Estimating claim gas on origin chain");
-            tracing::debug!("finalise tx bytes_len={} to={}", tx.data.len(), tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()));
-            match solver.delivery().estimate_gas(origin_chain_id, tx.clone()).await {
-                Ok(g) => {
-                    tracing::info!("Claim gas units: {}", g);
-                    claim_units = g;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        chain = origin_chain_id,
-                        to = %tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()),
-                        "estimate_gas(finalise) failed; using heuristic"
-                    );
+            if let Ok(tx) = self.build_claim_tx_for_estimation(quote, origin_chain_id, solver).await {
+                tracing::info!("Estimating claim gas on origin chain");
+                tracing::debug!("finalise tx bytes_len={} to={}", tx.data.len(), tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()));
+                match solver.delivery().estimate_gas(origin_chain_id, tx.clone()).await {
+                    Ok(g) => {
+                        tracing::info!("Claim gas units: {}", g);
+                        claim_units = g;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            chain = origin_chain_id,
+                            to = %tx.to.as_ref().map(|a| a.to_string()).unwrap_or_else(|| "<none>".into()),
+                            "estimate_gas(finalise) failed; using heuristic"
+                        );
+                    }
                 }
             }
-        }}
+        }
 
         // Gas prices
         let origin_gp = U256::from_str_radix(
@@ -206,6 +207,85 @@ impl CostEngine {
             .ethereum_chain_id()
             .map_err(|e| QuoteError::InvalidRequest(e.to_string()))?;
         Ok((origin, dest))
+    }
+
+    /// Create a minimal Order for gas estimation from a Quote
+    async fn create_order_for_estimation(
+        &self,
+        quote: &Quote,
+        _solver: &SolverEngine,
+    ) -> Result<Order, QuoteError> {
+        // Create a minimal order for gas estimation purposes
+        // This is safe because we only use it for transaction generation, not actual execution
+        Ok(Order {
+            id: format!("estimate-{}", quote.quote_id),
+            standard: "eip7683".to_string(),
+            created_at: solver_types::current_timestamp(),
+            updated_at: solver_types::current_timestamp(),
+            status: OrderStatus::Created,
+            data: serde_json::to_value(&quote.details).map_err(|e| QuoteError::Internal(e.to_string()))?, // Convert QuoteDetails to serde_json::Value
+            solver_address: Address(vec![0u8; 20]), // Dummy solver address for estimation
+            quote_id: Some(quote.quote_id.clone()),
+            input_chain_ids: vec![quote.details.available_inputs.get(0)
+                .ok_or_else(|| QuoteError::InvalidRequest("missing input".to_string()))?
+                .asset
+                .ethereum_chain_id()
+                .map_err(|e| QuoteError::InvalidRequest(e.to_string()))?],
+            output_chain_ids: vec![quote.details.requested_outputs.get(0)
+                .ok_or_else(|| QuoteError::InvalidRequest("missing output".to_string()))?
+                .asset
+                .ethereum_chain_id()
+                .map_err(|e| QuoteError::InvalidRequest(e.to_string()))?],
+            execution_params: None,
+            prepare_tx_hash: None,
+            fill_tx_hash: None,
+            claim_tx_hash: None,
+            fill_proof: None,
+        })
+    }
+
+    /// Build fill transaction using the proper order implementation
+    async fn build_fill_tx_for_estimation(
+        &self,
+        quote: &Quote,
+        _dest_chain_id: u64,
+        solver: &SolverEngine,
+    ) -> Result<Transaction, QuoteError> {
+        let order = self.create_order_for_estimation(quote, solver).await?;
+        // Create minimal execution params for estimation
+        let params = ExecutionParams {
+            gas_price: U256::from(1_000_000_000u64), // 1 gwei default
+            priority_fee: None,
+        };
+        
+        solver.order()
+            .generate_fill_transaction(&order, &params)
+            .await
+            .map_err(|e| QuoteError::Internal(e.to_string()))
+    }
+
+    /// Build claim transaction using the proper order implementation
+    async fn build_claim_tx_for_estimation(
+        &self,
+        quote: &Quote,
+        _origin_chain_id: u64,
+        solver: &SolverEngine,
+    ) -> Result<Transaction, QuoteError> {
+        let order = self.create_order_for_estimation(quote, solver).await?;
+        
+        // Create minimal fill proof for estimation
+        let fill_proof = FillProof {
+            oracle_address: "0x0000000000000000000000000000000000000000".to_string(),
+            filled_timestamp: solver_types::current_timestamp(),
+            block_number: 1,
+            tx_hash: TransactionHash(vec![0u8; 32]),
+            attestation_data: Some(vec![]),
+        };
+        
+        solver.order()
+            .generate_claim_transaction(&order, &fill_proof)
+            .await
+            .map_err(|e| QuoteError::Internal(e.to_string()))
     }
 }
 

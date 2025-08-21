@@ -436,6 +436,11 @@ impl SolverEngine {
 		&self.delivery
 	}
 
+	/// Returns a reference to the order service.
+	pub fn order(&self) -> &Arc<OrderService> {
+		&self.order
+	}
+
 	/// Returns a reference to the settlement service.
 	pub fn settlement(&self) -> &Arc<SettlementService> {
 		&self.settlement

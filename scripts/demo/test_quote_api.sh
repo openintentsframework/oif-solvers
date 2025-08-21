@@ -48,20 +48,30 @@ SOLVER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'solver = ' | cut
 USER_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user = ' | cut -d'"' -f2)
 RECIPIENT_ADDR=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'recipient = ' | cut -d'"' -f2)
 
-# Token addresses
-TOKENA_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
-TOKENB_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{c++} c==2 && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
-TOKENA_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
-TOKENB_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{c++} c==2 && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo.toml)
+# Token addresses (read from networks.toml, not demo.toml)
+TOKENA_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
+TOKENB_ORIGIN=$(awk '/\[\[networks.31337.tokens\]\]/{c++} c==2 && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
+TOKENA_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
+TOKENB_DEST=$(awk '/\[\[networks.31338.tokens\]\]/{c++} c==2 && /address =/{gsub(/"/, "", $3); print $3; exit}' config/demo/networks.toml)
 
-# ERC-7930 UII builder (demo networks chainRef mapping)
+# ERC-7930 UII builder (corrected format)
 to_uii() {
   local chain_id="$1"; local evm_addr="$2"
-  local chain_ref=""
-  if [ "$chain_id" = "31337" ]; then chain_ref="7a69"; fi
-  if [ "$chain_id" = "31338" ]; then chain_ref="7a6a"; fi
+  
+  # Convert chain ID to hex bytes (2 bytes for these test chain IDs)
+  local chain_ref_hex=$(printf "%04x" "$chain_id")
+  
+  # Clean the ethereum address (remove 0x prefix)
   local clean_addr=$(echo "$evm_addr" | sed 's/^0x//')
-  echo "0x0100000214${chain_ref}${clean_addr}"
+  
+  # ERC-7930 format: version(1) + chainType(2) + chainRefLen(1) + addrLen(1) + chainRef + address
+  # version: 01
+  # chainType: 0000 (EIP155)
+  # chainRefLen: 02 (2 bytes for chain reference)
+  # addrLen: 14 (20 bytes = 0x14)
+  # chainRef: actual chain ID as bytes (2 bytes)
+  # address: 20-byte ethereum address
+  echo "0x0100000214${chain_ref_hex}${clean_addr}"
 }
 
 USER_UII_ORIGIN=$(to_uii $ORIGIN_CHAIN_ID $USER_ADDR)
