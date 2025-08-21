@@ -498,7 +498,7 @@ mod tests {
 		let mut order = create_test_eip7683_order("order-unsupported", OrderStatus::Executed);
 		order.standard = "unsupported".to_string();
 
-		let err = convert_order_to_response(order).await.err().expect("err");
+		let err = convert_order_to_response(order).await.expect_err("err");
 		match err {
 			GetOrderError::Internal(msg) => assert!(msg.contains("Unsupported order standard")),
 			_ => panic!("expected Internal"),
@@ -515,7 +515,7 @@ mod tests {
 			}]
 		});
 
-		let err = convert_order_to_response(order).await.err().expect("err");
+		let err = convert_order_to_response(order).await.expect_err("err");
 		match err {
 			GetOrderError::Internal(msg) => assert!(msg.contains("Missing inputs field")),
 			_ => panic!("expected Internal"),
