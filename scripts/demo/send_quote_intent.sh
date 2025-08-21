@@ -51,6 +51,105 @@ TOKENA_UII_DEST=$(to_uii $DEST_CHAIN_ID $TOKENA_DEST)
 
 ONE="1000000000000000000"
 
+# Define variables needed for approve_permit2 function
+ORIGIN_TOKEN_ADDRESS="$TOKENA_ORIGIN"
+ORIGIN_RPC_URL="http://localhost:8545"
+USER_PRIVATE_KEY=$(grep -A 4 '\[accounts\]' config/demo.toml | grep 'user_private_key = ' | head -1 | cut -d'"' -f2)
+
+# Approve tokens for Permit2
+approve_permit2() {
+    local PERMIT2_ADDRESS="0x000000000022D473030F116dDEE9F6B43aC78BA3"
+    
+    echo -e "${BLUE}🔐 Checking Permit2 allowance...${NC}"
+    
+    CURRENT_ALLOWANCE=$(cast call "$ORIGIN_TOKEN_ADDRESS" \
+        "allowance(address,address)" \
+        "$USER_ADDR" \
+        "$PERMIT2_ADDRESS" \
+        --rpc-url $ORIGIN_RPC_URL)
+    
+    if [ "$CURRENT_ALLOWANCE" = "0x0000000000000000000000000000000000000000000000000000000000000000" ]; then
+        echo -e "${BLUE}   Approving Permit2...${NC}"
+        
+        TX_HASH=$(cast send "$ORIGIN_TOKEN_ADDRESS" \
+            "approve(address,uint256)" \
+            "$PERMIT2_ADDRESS" \
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" \
+            --private-key "$USER_PRIVATE_KEY" \
+            --rpc-url $ORIGIN_RPC_URL \
+            --json | jq -r '.transactionHash')
+        
+        echo -e "${GREEN}✅ Permit2 approved${NC}"
+    else
+        echo -e "${GREEN}✅ Sufficient allowance already exists${NC}"
+    fi
+}
+
+# Approve Permit2 if needed
+approve_permit2
+
+# Function to display formatted quote summary
+display_quote_summary() {
+  local quote_json="$1"
+  
+  echo -e "${BLUE}📊 Quote Summary${NC}"
+  echo "================="
+  
+  # Extract quote details
+  local quote_id=$(echo "$quote_json" | jq -r '.quotes[0].quoteId')
+  local valid_until=$(echo "$quote_json" | jq -r '.quotes[0].validUntil')
+  local orders_count=$(echo "$quote_json" | jq -r '.quotes[0].orders | length')
+  
+  # Format timestamp
+  local valid_until_formatted=$(date -r "$valid_until" 2>/dev/null || date -d "@$valid_until" 2>/dev/null || echo "$valid_until")
+  
+  # Extract cost breakdown if available
+  local total_cost=$(echo "$quote_json" | jq -r '.quotes[0].cost.total // "N/A"')
+  local gas_cost=$(echo "$quote_json" | jq -r '.quotes[0].cost.gas // "N/A"')
+  local commission=$(echo "$quote_json" | jq -r '.quotes[0].cost.commission // "N/A"')
+  local subtotal=$(echo "$quote_json" | jq -r '.quotes[0].cost.subtotal // "N/A"')
+  
+  echo -e "${GREEN}Quote ID:${NC}     $quote_id"
+  echo -e "${GREEN}Valid Until:${NC}  $valid_until_formatted"
+  echo -e "${GREEN}Orders:${NC}       $orders_count"
+  
+  # Format costs in ETH (divide by 1e18)
+  if [ "$total_cost" != "N/A" ]; then
+    local total_eth=$(echo "scale=6; $total_cost / 1000000000000000000" | bc -l 2>/dev/null || echo "$total_cost")
+    echo -e "${GREEN}Total Cost:${NC}   ${total_eth} ETH (${total_cost} wei)"
+    
+    if [ "$subtotal" != "N/A" ]; then
+      local subtotal_eth=$(echo "scale=6; $subtotal / 1000000000000000000" | bc -l 2>/dev/null || echo "$subtotal")
+      echo -e "${GREEN}Subtotal:${NC}     ${subtotal_eth} ETH"
+    fi
+    
+    if [ "$gas_cost" != "N/A" ]; then
+      local gas_eth=$(echo "scale=6; $gas_cost / 1000000000000000000" | bc -l 2>/dev/null || echo "$gas_cost")
+      echo -e "${GREEN}Gas Cost:${NC}     ${gas_eth} ETH"
+    fi
+    
+    if [ "$commission" != "N/A" ]; then
+      local commission_eth=$(echo "scale=6; $commission / 1000000000000000000" | bc -l 2>/dev/null || echo "$commission")
+      echo -e "${GREEN}Commission:${NC}   ${commission_eth} ETH"
+    fi
+  fi
+  
+  # Extract route information
+  echo ""
+  echo -e "${BLUE}📍 Route Details${NC}"
+  echo "================="
+  echo -e "${GREEN}Input:${NC}        1.0 TOKA (Chain 31337)"
+  echo -e "${GREEN}Output:${NC}       1.0 TOKA (Chain 31338)"
+  echo -e "${GREEN}User:${NC}         $USER_ADDR"
+  echo -e "${GREEN}Recipient:${NC}    $RECIPIENT_ADDR"
+  
+  # Extract and display preference if available
+  local preference=$(echo "$quote_json" | jq -r '.quotes[0].preference // "N/A"')
+  if [ "$preference" != "N/A" ]; then
+    echo -e "${GREEN}Preference:${NC}   $preference"
+  fi
+}
+
 QUOTE_PAYLOAD=$(jq -n \
   --arg user "$USER_UII_ORIGIN" \
   --arg a_user "$USER_UII_ORIGIN" \
@@ -77,8 +176,14 @@ if ! echo "$QUOTE_RESP" | jq -e '.quotes[0]' >/dev/null 2>&1; then
 fi
 
 echo -e "${GREEN}✅ Quote received${NC}"
-echo "$QUOTE_RESP" | jq '.quotes[0] | {quoteId, validUntil, orders: ( .orders | length )}'
 
+
+echo ""
+echo -e "${BLUE}📄 Raw Quote Details${NC}"
+echo "==================="
+echo "$QUOTE_RESP" | jq .
+
+echo ""
 TMP_QUOTE_JSON="/tmp/quote_$$.json"
 echo "$QUOTE_RESP" > "$TMP_QUOTE_JSON"
 
@@ -87,3 +192,5 @@ scripts/demo/build_transaction.sh "$TMP_QUOTE_JSON" "$ORDERS_ENDPOINT"
 
 echo -e "${GREEN}🎉 Intent Submitted${NC}"
 
+# Display formatted quote summary
+display_quote_summary "$QUOTE_RESP"

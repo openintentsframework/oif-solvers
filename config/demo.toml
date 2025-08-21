@@ -70,13 +70,6 @@ primary = "simple"
 [order.strategy.implementations.simple]
 max_gas_price_gwei = 100
 
-# Cost/Pricing configuration for quote generation
-pricing_currency = "USDC"              # Display currency for quote cost breakdowns
-commission_bps = 20                    # 0.20% commission applied over subtotal
-gas_buffer_bps = 1000                  # +10% buffer over estimated gas costs
-rate_buffer_bps = 14                   # +0.14% buffer over base price for rate movement
-enable_live_gas_estimate = true       # Use live gas estimation for more accurate costs
-
 # ============================================================================
 # SETTLEMENT
 # ============================================================================
