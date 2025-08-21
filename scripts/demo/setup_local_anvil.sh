@@ -520,8 +520,21 @@ address = "$INPUT_SETTLER"
 [settlement.implementations.direct]
 order = "eip7683"
 network_ids = [$ORIGIN_CHAIN_ID, $DEST_CHAIN_ID]
-oracle_addresses = { $ORIGIN_CHAIN_ID = "$ORACLE", $DEST_CHAIN_ID = "$ORACLE" }
 dispute_period_seconds = 1
+# Oracle selection strategy when multiple oracles are available (First, RoundRobin, Random)
+oracle_selection_strategy = "First"
+
+# Oracle configuration with multiple oracle support
+[settlement.implementations.direct.oracles]
+# Input oracles (on origin chains)
+input = { $ORIGIN_CHAIN_ID = ["$ORACLE"], $DEST_CHAIN_ID = ["$ORACLE"] }
+# Output oracles (on destination chains)
+output = { $ORIGIN_CHAIN_ID = ["$ORACLE"], $DEST_CHAIN_ID = ["$ORACLE"] }
+
+# Valid routes: from origin chain -> to destination chains
+[settlement.implementations.direct.routes]
+$ORIGIN_CHAIN_ID = [$DEST_CHAIN_ID]  # Can go from origin to destination
+$DEST_CHAIN_ID = [$ORIGIN_CHAIN_ID]  # Can go from destination to origin
 
 
 # ============================================================================

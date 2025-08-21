@@ -5,10 +5,7 @@
 //! readiness checks using simple transaction receipt verification without
 //! complex attestation mechanisms.
 
-use crate::{
-	utils::parse_oracle_config, OracleConfig, SettlementError,
-	SettlementInterface,
-};
+use crate::{utils::parse_oracle_config, OracleConfig, SettlementError, SettlementInterface};
 use alloy_primitives::{hex, FixedBytes};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::BlockTransactionsKind;

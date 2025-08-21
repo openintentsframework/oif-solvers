@@ -82,7 +82,7 @@ pub trait SettlementInterface: Send + Sync {
 		self.oracle_config()
 			.routes
 			.get(&input_chain)
-			.map_or(false, |outputs| outputs.contains(&output_chain))
+			.is_some_and(|outputs| outputs.contains(&output_chain))
 	}
 
 	/// Check if a specific input oracle is supported on a chain
@@ -90,7 +90,7 @@ pub trait SettlementInterface: Send + Sync {
 		self.oracle_config()
 			.input_oracles
 			.get(&chain_id)
-			.map_or(false, |oracles| oracles.contains(oracle))
+			.is_some_and(|oracles| oracles.contains(oracle))
 	}
 
 	/// Check if a specific output oracle is supported on a chain
@@ -98,7 +98,7 @@ pub trait SettlementInterface: Send + Sync {
 		self.oracle_config()
 			.output_oracles
 			.get(&chain_id)
-			.map_or(false, |oracles| oracles.contains(oracle))
+			.is_some_and(|oracles| oracles.contains(oracle))
 	}
 
 	/// Get all supported input oracles for a chain
@@ -287,10 +287,8 @@ impl SettlementService {
 				if settlement.is_input_oracle_supported(chain_id, oracle_address) {
 					return Ok(settlement.as_ref());
 				}
-			} else {
-				if settlement.is_output_oracle_supported(chain_id, oracle_address) {
-					return Ok(settlement.as_ref());
-				}
+			} else if settlement.is_output_oracle_supported(chain_id, oracle_address) {
+				return Ok(settlement.as_ref());
 			}
 		}
 		Err(SettlementError::ValidationFailed(format!(
@@ -315,7 +313,7 @@ impl SettlementService {
 			.map_err(|e| SettlementError::ValidationFailed(format!("Invalid order data: {}", e)))?;
 
 		let input_oracle = solver_types::utils::parse_address(&order_data.input_oracle)
-			.map_err(|e| SettlementError::ValidationFailed(e))?;
+			.map_err(SettlementError::ValidationFailed)?;
 		let origin_chain = order_data.origin_chain_id.to::<u64>();
 
 		// Find settlement by input oracle
@@ -349,13 +347,13 @@ impl SettlementService {
 		// If only one settlement, use it with oracle selection
 		if available_settlements.len() == 1 {
 			let (settlement, oracles) = &available_settlements[0];
-			let selected_oracle = settlement.select_oracle(&oracles, Some(context))?;
+			let selected_oracle = settlement.select_oracle(oracles, Some(context))?;
 			return Some((*settlement, selected_oracle));
 		}
 
 		// Multiple settlements - use first one but apply oracle selection
 		let (settlement, oracles) = &available_settlements[0];
-		let selected_oracle = settlement.select_oracle(&oracles, Some(context))?;
+		let selected_oracle = settlement.select_oracle(oracles, Some(context))?;
 		Some((*settlement, selected_oracle))
 	}
 

@@ -69,7 +69,7 @@ pub fn parse_address(hex_str: &str) -> Result<Address, String> {
 					bytes.len()
 				))
 			} else {
-				Ok(Address(bytes.try_into().unwrap()))
+				Ok(Address(bytes))
 			}
 		})
 }

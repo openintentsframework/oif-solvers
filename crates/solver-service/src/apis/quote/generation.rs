@@ -177,12 +177,17 @@ impl QuoteGenerator {
 		let (settlement, selected_oracle) = self
 			.settlement_service
 			.get_any_settlement_for_chain(chain_id)
-			.ok_or_else(|| QuoteError::InvalidRequest(
-				format!("No settlement available for chain {}", chain_id)
-			))?;
+			.ok_or_else(|| {
+				QuoteError::InvalidRequest(format!(
+					"No settlement available for chain {}",
+					chain_id
+				))
+			})?;
 
 		match escrow_kind {
-			EscrowKind::Permit2 => self.generate_permit2_order(request, config, settlement, selected_oracle),
+			EscrowKind::Permit2 => {
+				self.generate_permit2_order(request, config, settlement, selected_oracle)
+			},
 			EscrowKind::Erc3009 => self.generate_erc3009_order(request, config),
 		}
 	}

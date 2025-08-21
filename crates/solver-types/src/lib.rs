@@ -16,10 +16,10 @@ pub mod discovery;
 pub mod events;
 /// Network and token configuration types.
 pub mod networks;
-/// Order processing types including intents, orders, and execution contexts.
-pub mod order;
 /// Oracle-related types for settlement validation and routing.
 pub mod oracle;
+/// Order processing types including intents, orders, and execution contexts.
+pub mod order;
 /// Registry trait for self-registering implementations.
 pub mod registry;
 /// Secure string type for handling sensitive data.
