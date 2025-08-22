@@ -598,7 +598,7 @@ impl OrderInterface for Eip7683OrderImpl {
 						call: call.into(),
 					}
 					.abi_encode()
-				}
+				},
 				_ => IInputSettlerEscrow::finaliseCall {
 					order: order_struct,
 					timestamps,

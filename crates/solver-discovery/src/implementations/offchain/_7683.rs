@@ -513,7 +513,7 @@ impl Eip7683OffchainDiscovery {
 					.clone()
 					.unwrap_or_else(|| network.input_settler_address.clone());
 				Address::from_slice(&addr.0)
-			}
+			},
 			_ => Address::from_slice(&network.input_settler_address.0),
 		};
 
@@ -643,7 +643,7 @@ impl Eip7683OffchainDiscovery {
 						))
 					})?;
 				Ok(resp._0.0)
-			}
+			},
 			1 | 2 => {
 				// Escrow types (1=permit2-escrow, 2=3009-escrow) - use IInputSettlerEscrow
 				let escrow = IInputSettlerEscrow::new(settler_address, provider);
@@ -658,7 +658,7 @@ impl Eip7683OffchainDiscovery {
 						))
 					})?;
 				Ok(resp._0.0)
-			}
+			},
 			_ => {
 				// Default to escrow for unknown lock types
 				let escrow = IInputSettlerEscrow::new(settler_address, provider);
@@ -673,7 +673,7 @@ impl Eip7683OffchainDiscovery {
 						))
 					})?;
 				Ok(resp._0.0)
-			}
+			},
 		}
 	}
 
@@ -891,7 +891,7 @@ async fn handle_intent_submission(
 				}),
 			)
 				.into_response()
-		}
+		},
 		Err(e) => {
 			tracing::warn!(error = %e, "Failed to convert order to intent");
 			(
@@ -907,7 +907,7 @@ async fn handle_intent_submission(
 				}),
 			)
 				.into_response()
-		}
+		},
 	}
 }
 
