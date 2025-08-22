@@ -77,7 +77,7 @@ max_gas_price_gwei = 100
 
 [settlement.domain]
 chain_id = 1
-address = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 
 [settlement.implementations.direct]
 order = "eip7683"

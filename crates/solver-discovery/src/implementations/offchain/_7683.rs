@@ -56,6 +56,8 @@ use axum::{
 	Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json;
+use hex;
 use solver_types::{
 	current_timestamp,
 	standards::eip7683::{GasLimitOverrides, MandateOutput},
@@ -232,14 +234,17 @@ fn default_lock_type() -> u8 { 1 }
 ///
 /// # Fields
 ///
-/// * `order_id` - The computed order ID (hex encoded)
-/// * `status` - Either "success" or "error"
-/// * `message` - Optional error message when status is "error"
+/// * `order_id` - The assigned order identifier if accepted (optional)
+/// * `status` - Human/machine readable status string
+/// * `message` - Optional message for additional details on status
+/// * `order` - The submitted EIP-712 typed data order (optional)
 #[derive(Debug, Serialize)]
 struct IntentResponse {
-	order_id: String,
-	status: String, // error | success
+	#[serde(rename = "orderId")]
+	order_id: Option<String>,
+	status: String,
 	message: Option<String>,
+	order: Option<serde_json::Value>,
 }
 
 /// Shared state for the API server.
@@ -490,14 +495,15 @@ impl Eip7683OffchainDiscovery {
 			));
 		}
 		// Choose settler based on lock_type (3 => Compact)
-		let settler_address = if lock_type == 3 {
-			let addr = network
-				.input_settler_compact_address
-				.clone()
-				.unwrap_or_else(|| network.input_settler_address.clone());
-			Address::from_slice(&addr.0)
-		} else {
-			Address::from_slice(&network.input_settler_address.0)
+		let settler_address = match lock_type {
+			3 => {
+				let addr = network
+					.input_settler_compact_address
+					.clone()
+					.unwrap_or_else(|| network.input_settler_address.clone());
+				Address::from_slice(&addr.0)
+			}
+			_ => Address::from_slice(&network.input_settler_address.0),
 		};
 
 		// Get provider for the origin chain
@@ -509,7 +515,7 @@ impl Eip7683OffchainDiscovery {
 		})?;
 
 		// Generate order ID from order data
-		let order_id = Self::compute_order_id(order_bytes, provider, settler_address).await?;
+		let order_id = Self::compute_order_id(order_bytes, provider, settler_address, lock_type).await?;
 
 		// Validate that order has outputs
 		if order.outputs.is_empty() {
@@ -574,13 +580,22 @@ impl Eip7683OffchainDiscovery {
 
 	/// Computes order ID from order data.
 	///
-	/// Calls the `orderIdentifier` function on the origin settler contract
-	/// to compute the canonical order ID for the given order.
+	/// Determines which settler interface to use based on the lock_type and calls
+	/// the appropriate `orderIdentifier` function to compute the canonical order ID.
+	///
+	/// # Lock Types
+	///
+	/// * 1 = permit2-escrow (uses IInputSettlerEscrow)
+	/// * 2 = 3009-escrow (uses IInputSettlerEscrow) 
+	/// * 3 = resource-lock/TheCompact (uses IInputSettlerCompact)
+	/// * Other values default to IInputSettlerEscrow
 	///
 	/// # Arguments
 	///
-	/// * `order` - The order to compute ID for
+	/// * `order_bytes` - The encoded order bytes to compute ID for
 	/// * `provider` - RPC provider for calling the settler contract
+	/// * `settler_address` - Address of the appropriate settler contract
+	/// * `lock_type` - The custody/lock type determining which interface to use
 	///
 	/// # Returns
 	///
@@ -588,29 +603,57 @@ impl Eip7683OffchainDiscovery {
 	///
 	/// # Errors
 	///
-	/// Returns `DiscoveryError::Connection` if the contract call fails.
+	/// Returns `DiscoveryError::Connection` if the contract call fails or
+	/// `DiscoveryError::ParseError` if order decoding fails for compact orders.
 	async fn compute_order_id(
 		order_bytes: &Bytes,
 		provider: &RootProvider<Http<reqwest::Client>>,
 		settler_address: Address,
+		lock_type: u8,
 	) -> Result<[u8; 32], DiscoveryError> {
 		use alloy_sol_types::SolValue;
-		let escrow = IInputSettlerEscrow::new(settler_address, provider);
-		if let Ok(resp) = escrow.orderIdentifier(order_bytes.clone()).call().await {
-			return Ok(resp._0.0);
+		
+		match lock_type {
+			3 => {
+				// Resource Lock (TheCompact) - use IInputSettlerCompact
+				let std_order = StandardOrder::abi_decode(order_bytes, true).map_err(|e| {
+					DiscoveryError::ParseError(format!("Failed to decode StandardOrder: {}", e))
+				})?;
+				let compact = IInputSettlerCompact::new(settler_address, provider);
+				let resp = compact
+					.orderIdentifier(std_order)
+					.call()
+					.await
+					.map_err(|e| {
+						DiscoveryError::Connection(format!("Failed to get order ID from compact contract: {}", e))
+					})?;
+				Ok(resp._0.0)
+			}
+			1 | 2 => {
+				// Escrow types (1=permit2-escrow, 2=3009-escrow) - use IInputSettlerEscrow
+				let escrow = IInputSettlerEscrow::new(settler_address, provider);
+				let resp = escrow
+					.orderIdentifier(order_bytes.clone())
+					.call()
+					.await
+					.map_err(|e| {
+						DiscoveryError::Connection(format!("Failed to get order ID from escrow contract: {}", e))
+					})?;
+				Ok(resp._0.0)
+			}
+			_ => {
+				// Default to escrow for unknown lock types
+				let escrow = IInputSettlerEscrow::new(settler_address, provider);
+				let resp = escrow
+					.orderIdentifier(order_bytes.clone())
+					.call()
+					.await
+					.map_err(|e| {
+						DiscoveryError::Connection(format!("Failed to get order ID from escrow contract (default): {}", e))
+					})?;
+				Ok(resp._0.0)
+			}
 		}
-		let std_order = StandardOrder::abi_decode(order_bytes, true).map_err(|e| {
-			DiscoveryError::ParseError(format!("Failed to decode StandardOrder: {}", e))
-		})?;
-		let compact = IInputSettlerCompact::new(settler_address, provider);
-		let resp = compact
-			.orderIdentifier(std_order)
-			.call()
-			.await
-			.map_err(|e| {
-				DiscoveryError::Connection(format!("Failed to get order ID from contract: {}", e))
-			})?;
-		Ok(resp._0.0)
 	}
 
 	/// Main API server task.
@@ -712,11 +755,7 @@ async fn handle_intent_submission(
 	// if let Some(token) = &state.auth_token {
 	//     // Check Authorization header
 	// }
-	tracing::debug!(
-		request_sponsor = ?request.sponsor,
-		request_lock_type = request.lock_type,
-		"Received /intent request"
-	);
+
 	// Parse the StandardOrder from bytes
 	let order = match Eip7683OffchainDiscovery::parse_standard_order(&request.order) {
 		Ok(order) => order,
@@ -725,9 +764,10 @@ async fn handle_intent_submission(
 			return (
 				StatusCode::BAD_REQUEST,
 				Json(IntentResponse {
-					order_id: String::new(),
+					order_id: None,
 					status: "error".to_string(),
 					message: Some(format!("Failed to parse order: {}", e)),
+					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
 				}),
 			)
 				.into_response();
@@ -767,9 +807,10 @@ async fn handle_intent_submission(
 		return (
 			StatusCode::BAD_REQUEST,
 			Json(IntentResponse {
-				order_id: String::new(),
+				order_id: None,
 				status: "error".to_string(),
 				message: Some(e.to_string()),
+				order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
 			}),
 		)
 			.into_response();
@@ -795,9 +836,10 @@ async fn handle_intent_submission(
 				return (
 					StatusCode::INTERNAL_SERVER_ERROR,
 					Json(IntentResponse {
-						order_id,
+						order_id: Some(order_id),
 						status: "error".to_string(),
 						message: Some(format!("Failed to process intent: {}", e)),
+						order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
 					}),
 				)
 					.into_response();
@@ -807,9 +849,10 @@ async fn handle_intent_submission(
 			(
 				StatusCode::OK,
 				Json(IntentResponse {
-					order_id,
+					order_id: Some(order_id),
 					status: "success".to_string(),
 					message: None,
+					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
 				}),
 			)
 				.into_response()
@@ -819,9 +862,10 @@ async fn handle_intent_submission(
 			(
 				StatusCode::BAD_REQUEST,
 				Json(IntentResponse {
-					order_id: String::new(),
+					order_id: None,
 					status: "error".to_string(),
 					message: Some(e.to_string()),
+					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
 				}),
 			)
 				.into_response()

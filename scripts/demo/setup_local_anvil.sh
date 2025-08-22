@@ -316,6 +316,31 @@ if [ "$TOKENB" != "$TOKENB_DEST_CHECK" ]; then
 fi
 echo -e "${GREEN}✓${NC} $TOKENB"
 
+# Deploy InputSettlerEscrow (Contract #4 - same address on both chains)
+echo -n "  Deploying InputSettlerEscrow on both chains... "
+INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
+    --rpc-url http://localhost:$ORIGIN_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+INPUT_SETTLER=$(echo "$INPUT_SETTLER_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
+if [ -z "$INPUT_SETTLER" ]; then
+    echo -e "${RED}Failed on origin${NC}"
+    exit 1
+fi
+
+INPUT_SETTLER_DEST_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
+    --rpc-url http://localhost:$DEST_PORT \
+    --private-key $PRIVATE_KEY \
+    --broadcast 2>&1)
+INPUT_SETTLER_DEST_CHECK=$(echo "$INPUT_SETTLER_DEST_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
+if [ "$INPUT_SETTLER" != "$INPUT_SETTLER_DEST_CHECK" ]; then
+    echo -e "${RED}Address mismatch!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} $INPUT_SETTLER"
+
+
+
 # Deploy TheCompact (Contract #3 - same address on both chains)
 echo -n "  Deploying TheCompact on both chains... "
 COMPACT_OUTPUT=$(~/.foundry/bin/forge create lib/the-compact/src/TheCompact.sol:TheCompact \
@@ -345,28 +370,6 @@ if [ "$THE_COMPACT" != "$COMPACT_DEST_CHECK" ]; then
 fi
 echo -e "${GREEN}✓${NC} $THE_COMPACT"
 
-# Deploy InputSettlerEscrow (Contract #4 - same address on both chains)
-echo -n "  Deploying InputSettlerEscrow on both chains... "
-INPUT_SETTLER_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
-    --rpc-url http://localhost:$ORIGIN_PORT \
-    --private-key $PRIVATE_KEY \
-    --broadcast 2>&1)
-INPUT_SETTLER=$(echo "$INPUT_SETTLER_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
-if [ -z "$INPUT_SETTLER" ]; then
-    echo -e "${RED}Failed on origin${NC}"
-    exit 1
-fi
-
-INPUT_SETTLER_DEST_OUTPUT=$(~/.foundry/bin/forge create src/input/escrow/InputSettlerEscrow.sol:InputSettlerEscrow \
-    --rpc-url http://localhost:$DEST_PORT \
-    --private-key $PRIVATE_KEY \
-    --broadcast 2>&1)
-INPUT_SETTLER_DEST_CHECK=$(echo "$INPUT_SETTLER_DEST_OUTPUT" | grep "Deployed to:" | awk '{print $3}')
-if [ "$INPUT_SETTLER" != "$INPUT_SETTLER_DEST_CHECK" ]; then
-    echo -e "${RED}Address mismatch!${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✓${NC} $INPUT_SETTLER"
 
 echo -n "  Deploying AlwaysOKAllocator on both chains... "
 # Deploy AlwaysOKAllocator via forge 

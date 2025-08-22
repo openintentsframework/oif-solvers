@@ -268,11 +268,15 @@ impl OrderInterface for Eip7683OrderImpl {
 			return Ok(None);
 		}
 
+
 		let order_data: Eip7683OrderData =
 			serde_json::from_value(order.data.clone()).map_err(|e| {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
-
+		// Skip prepare for Compact (resource lock) flows
+		if matches!(order_data.lock_type, Some(3)) {
+			return Ok(None);
+		}
 		let raw_order_data = order_data.raw_order_data.as_ref().ok_or_else(|| {
 			OrderError::ValidationFailed("Missing raw order data for off-chain order".to_string())
 		})?;
@@ -285,10 +289,6 @@ impl OrderInterface for Eip7683OrderImpl {
 			OrderError::ValidationFailed("Missing signature for off-chain order".to_string())
 		})?;
 
-		// Skip prepare for Compact (resource lock) flows
-		if matches!(order_data.lock_type, Some(3)) {
-			return Ok(None);
-		}
 
 		// For the OIF contracts, we need to use the StandardOrder openFor
 		// The raw_order_data contains the encoded StandardOrder
@@ -463,7 +463,6 @@ impl OrderInterface for Eip7683OrderImpl {
 		order: &Order,
 		fill_proof: &FillProof,
 	) -> Result<Transaction, OrderError> {
-		tracing::debug!("Generating claim transaction for order {}", order.id);
 		let order_data: Eip7683OrderData =
 			serde_json::from_value(order.data.clone()).map_err(|e| {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
@@ -575,38 +574,40 @@ impl OrderInterface for Eip7683OrderImpl {
 			let parsed = serde_json::from_value::<Eip7683OrderData>(order.data.clone()).map_err(|e| {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
-			let is_compact = matches!(parsed.lock_type, Some(3));
-			if is_compact {
-				tracing::info!("Processing Compact claim for order {}", order.id);
-				
-				let sig_hex = parsed.signature.as_deref().ok_or_else(|| {
-					OrderError::ValidationFailed("Missing signatures for compact flow".to_string())
-				})?;
-				
-				// Expect full signature payload already without any type prefix
-				let sig_str = sig_hex.trim_start_matches("0x");
-				let compact_sig_bytes = hex::decode(sig_str).map_err(|e| {
-					OrderError::ValidationFailed(format!("Invalid compact signatures: {}", e))
-				})?;
-				
-				IInputSettlerCompact::finaliseCall {
-					order: order_struct,
-					signatures: compact_sig_bytes.into(),
-					timestamps,
-					solvers,
-					destination,
-					call: call.into(),
+			match parsed.lock_type {
+				Some(3) => {
+					tracing::info!("Processing Compact claim for order {}", order.id);
+					
+					let sig_hex = parsed.signature.as_deref().ok_or_else(|| {
+						OrderError::ValidationFailed("Missing signatures for compact flow".to_string())
+					})?;
+					
+					// Expect full signature payload already without any type prefix
+					let sig_str = sig_hex.trim_start_matches("0x");
+					let compact_sig_bytes = hex::decode(sig_str).map_err(|e| {
+						OrderError::ValidationFailed(format!("Invalid compact signatures: {}", e))
+					})?;
+					
+					IInputSettlerCompact::finaliseCall {
+						order: order_struct,
+						signatures: compact_sig_bytes.into(),
+						timestamps,
+						solvers,
+						destination,
+						call: call.into(),
+					}
+					.abi_encode()
 				}
-				.abi_encode()
-			} else {
-				IInputSettlerEscrow::finaliseCall {
-					order: order_struct,
-					timestamps,
-					solvers,
-					destination,
-					call: call.into(),
+				_ => {
+					IInputSettlerEscrow::finaliseCall {
+						order: order_struct,
+						timestamps,
+						solvers,
+						destination,
+						call: call.into(),
+					}
+					.abi_encode()
 				}
-				.abi_encode()
 			}
 		};
 
