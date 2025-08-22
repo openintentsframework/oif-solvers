@@ -151,7 +151,6 @@ process_intent() {
     local dest_token_decimals=$(echo "$intent_json" | jq -r '.dest_token.decimals')
     local input_amount=$(echo "$intent_json" | jq -r '.amounts.input')
     local output_amount=$(echo "$intent_json" | jq -r '.amounts.output')
-    local api_mode=$(echo "$intent_json" | jq -r '.api_mode // "default"')
     
     # Skip if disabled
     if [[ "$enabled" != "true" ]]; then
@@ -187,10 +186,6 @@ process_intent() {
     
     # Set API URL
     local api_url="http://localhost:3000/api/orders"
-    if [[ "$api_mode" == "direct" ]]; then
-        local api_port=$(grep -A 10 '\\[discovery.implementations.offchain_eip7683\\]' $MAIN_CONFIG | grep 'api_port = ' | awk '{print $3}')
-        api_url="http://localhost:${api_port:-8081}/intent"
-    fi
     
     echo -e "${YELLOW}🔗 API Endpoint: $api_url${NC}"
     

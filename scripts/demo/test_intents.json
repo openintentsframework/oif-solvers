@@ -19,8 +19,7 @@
         "input": "1000000",
         "output": "1000000",
         "solver_fee": "0"
-      },
-      "api_mode": "default"
+      }
     },
     {
       "description": "Base Sepolia USDC → Arbitrum Sepolia USDC",
@@ -41,8 +40,7 @@
         "input": "1000000",
         "output": "1000000",
         "solver_fee": "0"
-      },
-      "api_mode": "default"
+      }
     },
     {
       "description": "Ethereum Sepolia DAI → Base Sepolia USDC",
@@ -63,8 +61,7 @@
         "input": "1000000000000000000",
         "output": "1000000",
         "solver_fee": "0"
-      },
-      "api_mode": "default"
+      }
     },
     {
       "description": "Optimism Sepolia USDC → Arbitrum Sepolia USDC",
@@ -85,8 +82,7 @@
         "input": "1000000",
         "output": "1000000",
         "solver_fee": "0"
-      },
-      "api_mode": "default"
+      }
     }
   ]
 }
