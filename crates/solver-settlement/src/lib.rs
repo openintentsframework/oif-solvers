@@ -133,6 +133,9 @@ pub trait SettlementInterface: Send + Sync {
 		match self.oracle_config().selection_strategy {
 			OracleSelectionStrategy::First => oracles.first().cloned(),
 			OracleSelectionStrategy::RoundRobin => {
+				// For round-robin, we need a context value. If none provided,
+				// default to 0 (will select first oracle). Callers should provide
+				// proper context (e.g., order nonce) for deterministic distribution.
 				let context = selection_context.unwrap_or(0);
 				let index = (context as usize) % oracles.len();
 				oracles.get(index).cloned()
@@ -312,8 +315,10 @@ impl SettlementService {
 		order: &Order,
 	) -> Result<&dyn SettlementInterface, SettlementError> {
 		// Parse order data to get input oracle
-		let order_data: solver_types::Eip7683OrderData = serde_json::from_value(order.data.clone())
-			.map_err(|e| SettlementError::ValidationFailed(format!("Invalid order data: {}", e)))?;
+		let order_data: solver_types::Eip7683OrderData =
+			serde_json::from_value(order.data.to_owned()).map_err(|e| {
+				SettlementError::ValidationFailed(format!("Invalid order data: {}", e))
+			})?;
 
 		let input_oracle = solver_types::utils::parse_address(&order_data.input_oracle)
 			.map_err(SettlementError::ValidationFailed)?;

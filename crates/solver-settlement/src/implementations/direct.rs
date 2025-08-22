@@ -42,15 +42,16 @@ impl DirectSettlement {
 	) -> Result<Self, SettlementError> {
 		// Create RPC providers for each network that has oracles configured
 		let mut providers = HashMap::new();
-		let mut all_network_ids = std::collections::HashSet::new();
 
-		// Collect all network IDs from input and output oracles
-		for network_id in oracle_config.input_oracles.keys() {
-			all_network_ids.insert(*network_id);
-		}
-		for network_id in oracle_config.output_oracles.keys() {
-			all_network_ids.insert(*network_id);
-		}
+		// Collect unique network IDs from input and output oracles
+		let mut all_network_ids: Vec<u64> = oracle_config
+			.input_oracles
+			.keys()
+			.chain(oracle_config.output_oracles.keys())
+			.copied()
+			.collect();
+		all_network_ids.sort_unstable();
+		all_network_ids.dedup();
 
 		for network_id in all_network_ids {
 			let network = networks.get(&network_id).ok_or_else(|| {

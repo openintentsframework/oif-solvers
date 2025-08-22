@@ -95,8 +95,8 @@ output = { 31337 = ["0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"], 31338 = ["0xD
 
 # Valid routes: from origin chain -> to destination chains
 [settlement.implementations.direct.routes]
-31337 = [31338]  # Can go from chain 31337 to chain 31338
-31338 = [31337]  # Can go from chain 31338 to chain 31337
+31337 = [31338]  # Can go from origin to destination
+31338 = [31337]  # Can go from destination to origin
 
 
 # ============================================================================
