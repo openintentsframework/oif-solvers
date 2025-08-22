@@ -473,6 +473,10 @@ impl SolverBuilder {
 			}
 		}
 
+		// Create simple price service for demo tokens
+		let price_service = Arc::new(crate::price::PriceService::new());
+		tracing::info!(component = "price_service", "Demo token price service initialized");
+
 		Ok(SolverEngine::new(
 			self.config,
 			storage,
@@ -482,6 +486,7 @@ impl SolverBuilder {
 			discovery,
 			order,
 			settlement,
+			price_service,
 			EventBus::new(1000),
 			token_manager,
 		))

@@ -9,6 +9,7 @@ use solver_core::{SolverBuilder, SolverEngine, SolverFactories};
 use solver_delivery::{DeliveryError, DeliveryInterface};
 use solver_discovery::{DiscoveryError, DiscoveryInterface};
 use solver_order::{ExecutionStrategy, OrderError, OrderInterface, StrategyError};
+
 use solver_settlement::{SettlementError, SettlementInterface};
 use solver_storage::{StorageError, StorageInterface};
 use solver_types::NetworksConfig;
@@ -31,6 +32,7 @@ pub type OrderFactory =
 pub type SettlementFactory =
 	fn(&toml::Value, &NetworksConfig) -> Result<Box<dyn SettlementInterface>, SettlementError>;
 pub type StrategyFactory = fn(&toml::Value) -> Result<Box<dyn ExecutionStrategy>, StrategyError>;
+
 
 /// Global registry for all implementation factories
 pub struct FactoryRegistry {
@@ -91,6 +93,8 @@ impl FactoryRegistry {
 	pub fn register_strategy(&mut self, name: impl Into<String>, factory: StrategyFactory) {
 		self.strategy.insert(name.into(), factory);
 	}
+
+
 }
 
 // Global registry instance
@@ -142,6 +146,8 @@ pub fn initialize_registry() -> &'static FactoryRegistry {
 			tracing::debug!("Registering strategy implementation: {}", name);
 			registry.register_strategy(name, factory);
 		}
+
+
 
 		registry
 	})

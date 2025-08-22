@@ -1,6 +1,7 @@
-use alloy_primitives::U256;
+use alloy_primitives::{hex, U256};
 use solver_config::Config;
 use solver_core::SolverEngine;
+use solver_core::price::{PriceRequest};
 use solver_types::{
 	Address, ExecutionParams, FillProof, Order, OrderStatus, Transaction, TransactionHash,
 };
@@ -171,7 +172,11 @@ impl CostEngine {
 		let gas_subtotal = add_many(&[open_cost.clone(), fill_cost.clone(), claim_cost.clone()]);
 		let buffer_gas = apply_bps(&gas_subtotal, pricing.gas_buffer_bps);
 
-		let base_price = "0".to_string();
+		// Calculate base price using USD normalization (like the TypeScript solver)
+		let base_price = self.calculate_base_price_usd(quote, solver).await.unwrap_or_else(|e| {
+			tracing::warn!("Failed to calculate base price from rates: {}. Using zero.", e);
+			"0".to_string()
+		});
 		let buffer_rates = apply_bps(&base_price, pricing.rate_buffer_bps);
 
 		let subtotal = add_many(&[
@@ -352,6 +357,72 @@ impl CostEngine {
 			.await
 			.map_err(|e| QuoteError::Internal(e.to_string()))
 	}
+
+	/// Calculate base price in USD using token rate normalization.
+	///
+	/// Simple implementation for single input/output with USD normalization:
+	/// 1. Convert input amount to USD using token price
+	/// 2. Convert output amount to USD using token price  
+	/// 3. Calculate the net difference (output_value_usd - input_value_usd)
+	/// 4. If positive, this is cost to solver; if negative, this is profit (return 0)
+	async fn calculate_base_price_usd(
+		&self, 
+		quote: &Quote, 
+		solver: &SolverEngine
+	) -> Result<String, QuoteError> {
+		// Get first input and output (keep it simple)
+		let input = quote.details.available_inputs.get(0)
+			.ok_or_else(|| QuoteError::InvalidRequest("missing input".to_string()))?;
+		let output = quote.details.requested_outputs.get(0)
+			.ok_or_else(|| QuoteError::InvalidRequest("missing output".to_string()))?;
+
+		// Get input token price
+		let input_addr = input.asset.ethereum_address()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid input address: {}", e)))?;
+		let input_chain = input.asset.ethereum_chain_id()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid input chain: {}", e)))?;
+		
+		let input_request = PriceRequest {
+			token_address: format!("0x{}", hex::encode(input_addr)),
+			chain_id: input_chain,
+		};
+		let input_price = solver.price_service().get_token_price(&input_request).await
+			.map_err(|e| QuoteError::Internal(format!("Failed to get input price: {}", e)))?;
+
+		// Get output token price
+		let output_addr = output.asset.ethereum_address()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid output address: {}", e)))?;
+		let output_chain = output.asset.ethereum_chain_id()
+			.map_err(|e| QuoteError::InvalidRequest(format!("Invalid output chain: {}", e)))?;
+		
+		let output_request = PriceRequest {
+			token_address: format!("0x{}", hex::encode(output_addr)),
+			chain_id: output_chain,
+		};
+		let output_price = solver.price_service().get_token_price(&output_request).await
+			.map_err(|e| QuoteError::Internal(format!("Failed to get output price: {}", e)))?;
+
+		// Simple USD calculation (assume 18 decimals for demo tokens)
+		let input_price_f64: f64 = input_price.price_usd.parse().unwrap_or(0.0);
+		let output_price_f64: f64 = output_price.price_usd.parse().unwrap_or(0.0);
+		
+		let input_amount_f64 = input.amount.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
+		let output_amount_f64 = output.amount.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
+
+		let input_value_usd = input_amount_f64 * input_price_f64;
+		let output_value_usd = output_amount_f64 * output_price_f64;
+
+		// If output costs more than input, solver needs to cover the difference
+		let base_cost = if output_value_usd > input_value_usd {
+			(output_value_usd - input_value_usd) * 1e18 // Convert back to wei-like units
+		} else {
+			0.0 // Profit case - no additional cost
+		};
+
+		Ok(format!("{:.0}", base_cost))
+	}
+
+
 }
 
 // helpers

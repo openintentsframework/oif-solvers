@@ -18,6 +18,8 @@ pub mod events;
 pub mod networks;
 /// Order processing types including intents, orders, and execution contexts.
 pub mod order;
+/// Price feed types for token price discovery.
+pub mod price;
 /// Registry trait for self-registering implementations.
 pub mod registry;
 /// Secure string type for handling sensitive data.
@@ -39,6 +41,7 @@ pub use discovery::*;
 pub use events::*;
 pub use networks::{NetworkConfig, NetworksConfig, TokenConfig};
 pub use order::*;
+pub use price::*;
 pub use registry::ImplementationRegistry;
 pub use secret_string::SecretString;
 pub use standards::{

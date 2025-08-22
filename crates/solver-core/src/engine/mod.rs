@@ -18,6 +18,7 @@ use solver_config::Config;
 use solver_delivery::DeliveryService;
 use solver_discovery::DiscoveryService;
 use solver_order::OrderService;
+use solver_price::PriceService;
 use solver_settlement::SettlementService;
 use solver_storage::StorageService;
 use solver_types::{Address, DeliveryEvent, Intent, OrderEvent, SettlementEvent, SolverEvent};
@@ -63,6 +64,9 @@ pub struct SolverEngine {
 	/// Settlement service for monitoring and claiming.
 	#[allow(dead_code)]
 	pub(crate) settlement: Arc<SettlementService>,
+	/// Price service for fetching token prices.
+	#[allow(dead_code)]
+	pub(crate) price_service: Arc<PriceService>,
 	/// Token manager for token approvals and validation.
 	#[allow(dead_code)]
 	pub(crate) token_manager: Arc<TokenManager>,
@@ -104,6 +108,7 @@ impl SolverEngine {
 	/// * `discovery` - Service for discovering new intents
 	/// * `order` - Service for order validation and execution
 	/// * `settlement` - Service for monitoring and claiming settlements
+	/// * `price_service` - Service for fetching token prices
 	/// * `event_bus` - Event bus for inter-service communication
 	/// * `token_manager` - Manager for token approvals and validation
 	#[allow(clippy::too_many_arguments)]
@@ -116,6 +121,7 @@ impl SolverEngine {
 		discovery: Arc<DiscoveryService>,
 		order: Arc<OrderService>,
 		settlement: Arc<SettlementService>,
+		price_service: Arc<PriceService>,
 		event_bus: event_bus::EventBus,
 		token_manager: Arc<TokenManager>,
 	) -> Self {
@@ -166,6 +172,7 @@ impl SolverEngine {
 			discovery,
 			order,
 			settlement,
+			price_service,
 			token_manager,
 			event_bus,
 			state_machine,
@@ -444,6 +451,11 @@ impl SolverEngine {
 	/// Returns a reference to the settlement service.
 	pub fn settlement(&self) -> &Arc<SettlementService> {
 		&self.settlement
+	}
+
+	/// Returns a reference to the price service.
+	pub fn price_service(&self) -> &Arc<PriceService> {
+		&self.price_service
 	}
 
 	/// Returns a reference to the discovery service.
