@@ -81,8 +81,23 @@ address = "0xB686e4A97821E259d1BB15c5bf13ec96553176d7"
 [settlement.implementations.direct]
 order = "eip7683"
 network_ids = [84532, 11155420, 421614, 11155111]
-oracle_addresses = { 11155420 = "0x6dc56CB6C61f3c5a9148cE1fD1AF7a13B8903980", 84532 = "0xDD40C9a79D813e4200795014b8E9e575317596F6", 421614 = "0xedF6cd53008C3EA43e976214F5f6a1A8dBDc6460", 11155111 = "0xc04c8A84295F36B53AC109d47C041a258B788268" }
 dispute_period_seconds = 60
+# Oracle selection strategy when multiple oracles are available (First, RoundRobin, Random)
+oracle_selection_strategy = "First"
+
+# Oracle configuration with multiple oracle support
+[settlement.implementations.direct.oracles]
+# Input oracles (on origin chains)
+input = { 84532 = ["0xDD40C9a79D813e4200795014b8E9e575317596F6"], 11155420 = ["0x6dc56CB6C61f3c5a9148cE1fD1AF7a13B8903980"], 421614 = ["0xedF6cd53008C3EA43e976214F5f6a1A8dBDc6460"], 11155111 = ["0xc04c8A84295F36B53AC109d47C041a258B788268"] }
+# Output oracles (on destination chains)
+output = { 84532 = ["0xDD40C9a79D813e4200795014b8E9e575317596F6"], 11155420 = ["0x6dc56CB6C61f3c5a9148cE1fD1AF7a13B8903980"], 421614 = ["0xedF6cd53008C3EA43e976214F5f6a1A8dBDc6460"], 11155111 = ["0xc04c8A84295F36B53AC109d47C041a258B788268"] }
+
+# Valid routes: from origin chain -> to destination chains
+[settlement.implementations.direct.routes]
+84532 = [11155420, 421614, 11155111]     # Base Sepolia can go to all other networks
+11155420 = [84532, 421614, 11155111]    # Optimism Sepolia can go to all other networks
+421614 = [84532, 11155420, 11155111]    # Arbitrum Sepolia can go to all other networks
+11155111 = [84532, 11155420, 421614]    # Ethereum Sepolia can go to all other networks
 
 # ============================================================================
 # DEMO SCRIPT CONFIGURATION

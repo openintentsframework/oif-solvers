@@ -122,7 +122,7 @@ get_network_config() {
             awk "/\[\[networks\.${chain_id}\.rpc_urls\]\]/{f=1} f && /^http = /{print; exit}" $NETWORKS_CONFIG | cut -d'"' -f2
             ;;
         "oracle")
-            grep 'oracle_addresses = ' $MAIN_CONFIG | sed "s/.*${chain_id} = \"\([^\"]*\)\".*/\1/"
+            grep -A5 '\[settlement.implementations.direct.oracles\]' $MAIN_CONFIG | grep 'input = ' | sed "s/.*${chain_id} = \[\"\([^\"]*\)\".*/\1/"
             ;;
     esac
 }
