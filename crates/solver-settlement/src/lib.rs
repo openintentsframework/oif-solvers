@@ -139,16 +139,16 @@ pub trait SettlementInterface: Send + Sync {
 			},
 			OracleSelectionStrategy::Random => {
 				use std::collections::hash_map::RandomState;
-				use std::hash::{BuildHasher, Hash, Hasher};
-				let mut hasher = RandomState::new().build_hasher();
+				use std::hash::BuildHasher;
+
 				let context = selection_context.unwrap_or_else(|| {
 					std::time::SystemTime::now()
 						.duration_since(std::time::UNIX_EPOCH)
 						.map(|d| d.as_secs())
 						.unwrap_or(0)
 				});
-				context.hash(&mut hasher);
-				let index = (hasher.finish() as usize) % oracles.len();
+
+				let index = (RandomState::new().hash_one(context) as usize) % oracles.len();
 				oracles.get(index).cloned()
 			},
 		}
@@ -239,7 +239,7 @@ impl SettlementService {
 	pub fn build_oracle_routes(&self) -> OracleRoutes {
 		let mut supported_routes = HashMap::new();
 
-		for (_name, settlement) in &self.implementations {
+		for settlement in self.implementations.values() {
 			let config = settlement.oracle_config();
 
 			// For each input oracle
@@ -285,7 +285,7 @@ impl SettlementService {
 		oracle_address: &Address,
 		is_input: bool,
 	) -> Result<&dyn SettlementInterface, SettlementError> {
-		for (_name, settlement) in &self.implementations {
+		for settlement in self.implementations.values() {
 			if is_input {
 				if settlement.is_input_oracle_supported(chain_id, oracle_address) {
 					return Ok(settlement.as_ref());
@@ -332,7 +332,7 @@ impl SettlementService {
 		// Collect all settlements that support this chain with their oracles
 		let mut available_settlements = Vec::new();
 
-		for (_name, settlement) in &self.implementations {
+		for settlement in self.implementations.values() {
 			if let Some(oracles) = settlement.oracle_config().input_oracles.get(&chain_id) {
 				if !oracles.is_empty() {
 					available_settlements.push((settlement.as_ref(), oracles.clone()));
