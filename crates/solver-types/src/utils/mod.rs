@@ -29,10 +29,16 @@ pub fn format_standard_order_lines(
 	fill_deadline: u32,
 	input_oracle: Address,
 	inputs: &[[U256; 2]],
-	first_output: Option<([
-		u8;
-		32
-	], [u8; 32], U256, [u8; 32], U256, [u8; 32], usize, usize)>,
+	first_output: Option<(
+		[u8; 32],
+		[u8; 32],
+		U256,
+		[u8; 32],
+		U256,
+		[u8; 32],
+		usize,
+		usize,
+	)>,
 ) -> Vec<String> {
 	let mut lines = Vec::new();
 	lines.push("Parsed order".to_string());
@@ -46,7 +52,10 @@ pub fn format_standard_order_lines(
 		with_0x_prefix(&hex::encode(input_oracle))
 	));
 	lines.push(format!("inputs_len: {}", inputs.len()));
-	lines.push(format!("outputs_len: {}", if first_output.is_some() { 1 } else { 0 }));
+	lines.push(format!(
+		"outputs_len: {}",
+		if first_output.is_some() { 1 } else { 0 }
+	));
 
 	if let Some((oracle, settler, chain_id, token, amount, recipient, call_len, context_len)) =
 		first_output
@@ -97,14 +106,14 @@ pub fn format_standard_order_lines(
 /// bytes at the end), it will be converted to left-padded. Otherwise it is
 /// returned unchanged.
 pub fn normalize_bytes32_address(bytes32_value: [u8; 32]) -> [u8; 32] {
-    // Detect right-padded shape: [address(20)][zeros(12)]
-    let is_trailing_zeros = bytes32_value[20..32].iter().all(|&b| b == 0);
-    let has_nonzero_prefix = bytes32_value[0..20].iter().any(|&b| b != 0);
-    if is_trailing_zeros && has_nonzero_prefix {
-        let mut normalized = [0u8; 32];
-        normalized[12..32].copy_from_slice(&bytes32_value[0..20]);
-        normalized
-    } else {
-        bytes32_value
-    }
+	// Detect right-padded shape: [address(20)][zeros(12)]
+	let is_trailing_zeros = bytes32_value[20..32].iter().all(|&b| b == 0);
+	let has_nonzero_prefix = bytes32_value[0..20].iter().any(|&b| b != 0);
+	if is_trailing_zeros && has_nonzero_prefix {
+		let mut normalized = [0u8; 32];
+		normalized[12..32].copy_from_slice(&bytes32_value[0..20]);
+		normalized
+	} else {
+		bytes32_value
+	}
 }

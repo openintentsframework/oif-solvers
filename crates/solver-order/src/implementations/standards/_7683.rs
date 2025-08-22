@@ -268,7 +268,6 @@ impl OrderInterface for Eip7683OrderImpl {
 			return Ok(None);
 		}
 
-
 		let order_data: Eip7683OrderData =
 			serde_json::from_value(order.data.clone()).map_err(|e| {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
@@ -288,7 +287,6 @@ impl OrderInterface for Eip7683OrderImpl {
 		let signature = order_data.signature.as_ref().ok_or_else(|| {
 			OrderError::ValidationFailed("Missing signature for off-chain order".to_string())
 		})?;
-
 
 		// For the OIF contracts, we need to use the StandardOrder openFor
 		// The raw_order_data contains the encoded StandardOrder
@@ -571,23 +569,26 @@ impl OrderInterface for Eip7683OrderImpl {
 
 		// Encode the finalise call. If Compact flow, include signatures argument.
 		let call_data = {
-			let parsed = serde_json::from_value::<Eip7683OrderData>(order.data.clone()).map_err(|e| {
-				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
-			})?;
+			let parsed =
+				serde_json::from_value::<Eip7683OrderData>(order.data.clone()).map_err(|e| {
+					OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
+				})?;
 			match parsed.lock_type {
 				Some(3) => {
 					tracing::info!("Processing Compact claim for order {}", order.id);
-					
+
 					let sig_hex = parsed.signature.as_deref().ok_or_else(|| {
-						OrderError::ValidationFailed("Missing signatures for compact flow".to_string())
+						OrderError::ValidationFailed(
+							"Missing signatures for compact flow".to_string(),
+						)
 					})?;
-					
+
 					// Expect full signature payload already without any type prefix
 					let sig_str = sig_hex.trim_start_matches("0x");
 					let compact_sig_bytes = hex::decode(sig_str).map_err(|e| {
 						OrderError::ValidationFailed(format!("Invalid compact signatures: {}", e))
 					})?;
-					
+
 					IInputSettlerCompact::finaliseCall {
 						order: order_struct,
 						signatures: compact_sig_bytes.into(),
@@ -598,16 +599,14 @@ impl OrderInterface for Eip7683OrderImpl {
 					}
 					.abi_encode()
 				}
-				_ => {
-					IInputSettlerEscrow::finaliseCall {
-						order: order_struct,
-						timestamps,
-						solvers,
-						destination,
-						call: call.into(),
-					}
-					.abi_encode()
+				_ => IInputSettlerEscrow::finaliseCall {
+					order: order_struct,
+					timestamps,
+					solvers,
+					destination,
+					call: call.into(),
 				}
+				.abi_encode(),
 			}
 		};
 
@@ -616,15 +615,12 @@ impl OrderInterface for Eip7683OrderImpl {
 			.input_chain_ids
 			.first()
 			.ok_or_else(|| OrderError::ValidationFailed("No input chains in order".into()))?;
-		let network_cfg = self
-			.networks
-			.get(&origin_chain_id)
-			.ok_or_else(|| {
-				OrderError::ValidationFailed(format!(
-					"Chain ID {} not found in networks configuration",
-					order_data.origin_chain_id
-				))
-			})?;
+		let network_cfg = self.networks.get(&origin_chain_id).ok_or_else(|| {
+			OrderError::ValidationFailed(format!(
+				"Chain ID {} not found in networks configuration",
+				order_data.origin_chain_id
+			))
+		})?;
 		let is_compact = serde_json::from_value::<Eip7683OrderData>(order.data.clone())
 			.ok()
 			.and_then(|d| d.lock_type)

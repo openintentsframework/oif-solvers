@@ -55,14 +55,14 @@ use axum::{
 	routing::post,
 	Router,
 };
+use hex;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use hex;
 use solver_types::{
-	current_timestamp,
+	current_timestamp, format_standard_order_lines, normalize_bytes32_address,
 	standards::eip7683::{GasLimitOverrides, MandateOutput},
 	with_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, ImplementationRegistry,
-	Intent, IntentMetadata, NetworksConfig, Schema, format_standard_order_lines, normalize_bytes32_address,
+	Intent, IntentMetadata, NetworksConfig, Schema,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -198,7 +198,13 @@ where
 	match v {
 		serde_json::Value::Number(n) => n
 			.as_u64()
-			.and_then(|x| if x <= u8::MAX as u64 { Some(x as u8) } else { None })
+			.and_then(|x| {
+				if x <= u8::MAX as u64 {
+					Some(x as u8)
+				} else {
+					None
+				}
+			})
 			.ok_or_else(|| Error::custom("u8 out of range")),
 		serde_json::Value::String(s) => s
 			.parse::<u8>()
@@ -222,11 +228,16 @@ struct IntentRequest {
 	order: Bytes,
 	sponsor: Address,
 	signature: Bytes,
-	#[serde(default = "default_lock_type", deserialize_with = "deserialize_u8_flexible")]
+	#[serde(
+		default = "default_lock_type",
+		deserialize_with = "deserialize_u8_flexible"
+	)]
 	lock_type: u8, // 1=permit2-escrow, 2=3009-escrow, 3=lock-resource-lock (work around)
 }
 
-fn default_lock_type() -> u8 { 1 }
+fn default_lock_type() -> u8 {
+	1
+}
 
 /// API response for intent submission.
 ///
@@ -515,7 +526,8 @@ impl Eip7683OffchainDiscovery {
 		})?;
 
 		// Generate order ID from order data
-		let order_id = Self::compute_order_id(order_bytes, provider, settler_address, lock_type).await?;
+		let order_id =
+			Self::compute_order_id(order_bytes, provider, settler_address, lock_type).await?;
 
 		// Validate that order has outputs
 		if order.outputs.is_empty() {
@@ -586,7 +598,7 @@ impl Eip7683OffchainDiscovery {
 	/// # Lock Types
 	///
 	/// * 1 = permit2-escrow (uses IInputSettlerEscrow)
-	/// * 2 = 3009-escrow (uses IInputSettlerEscrow) 
+	/// * 2 = 3009-escrow (uses IInputSettlerEscrow)
 	/// * 3 = resource-lock/TheCompact (uses IInputSettlerCompact)
 	/// * Other values default to IInputSettlerEscrow
 	///
@@ -612,7 +624,7 @@ impl Eip7683OffchainDiscovery {
 		lock_type: u8,
 	) -> Result<[u8; 32], DiscoveryError> {
 		use alloy_sol_types::SolValue;
-		
+
 		match lock_type {
 			3 => {
 				// Resource Lock (TheCompact) - use IInputSettlerCompact
@@ -625,7 +637,10 @@ impl Eip7683OffchainDiscovery {
 					.call()
 					.await
 					.map_err(|e| {
-						DiscoveryError::Connection(format!("Failed to get order ID from compact contract: {}", e))
+						DiscoveryError::Connection(format!(
+							"Failed to get order ID from compact contract: {}",
+							e
+						))
 					})?;
 				Ok(resp._0.0)
 			}
@@ -637,7 +652,10 @@ impl Eip7683OffchainDiscovery {
 					.call()
 					.await
 					.map_err(|e| {
-						DiscoveryError::Connection(format!("Failed to get order ID from escrow contract: {}", e))
+						DiscoveryError::Connection(format!(
+							"Failed to get order ID from escrow contract: {}",
+							e
+						))
 					})?;
 				Ok(resp._0.0)
 			}
@@ -649,7 +667,10 @@ impl Eip7683OffchainDiscovery {
 					.call()
 					.await
 					.map_err(|e| {
-						DiscoveryError::Connection(format!("Failed to get order ID from escrow contract (default): {}", e))
+						DiscoveryError::Connection(format!(
+							"Failed to get order ID from escrow contract (default): {}",
+							e
+						))
 					})?;
 				Ok(resp._0.0)
 			}
@@ -767,7 +788,10 @@ async fn handle_intent_submission(
 					order_id: None,
 					status: "error".to_string(),
 					message: Some(format!("Failed to parse order: {}", e)),
-					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
+					order: Some(serde_json::Value::String(format!(
+						"0x{}",
+						hex::encode(&request.order)
+					))),
 				}),
 			)
 				.into_response();
@@ -797,7 +821,9 @@ async fn handle_intent_submission(
 		&order.inputs,
 		first_output,
 	);
-	for line in lines { tracing::info!("{}", line); }
+	for line in lines {
+		tracing::info!("{}", line);
+	}
 
 	// Validate order
 	if let Err(e) =
@@ -810,7 +836,10 @@ async fn handle_intent_submission(
 				order_id: None,
 				status: "error".to_string(),
 				message: Some(e.to_string()),
-				order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
+				order: Some(serde_json::Value::String(format!(
+					"0x{}",
+					hex::encode(&request.order)
+				))),
 			}),
 		)
 			.into_response();
@@ -839,7 +868,10 @@ async fn handle_intent_submission(
 						order_id: Some(order_id),
 						status: "error".to_string(),
 						message: Some(format!("Failed to process intent: {}", e)),
-						order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
+						order: Some(serde_json::Value::String(format!(
+							"0x{}",
+							hex::encode(&request.order)
+						))),
 					}),
 				)
 					.into_response();
@@ -852,7 +884,10 @@ async fn handle_intent_submission(
 					order_id: Some(order_id),
 					status: "success".to_string(),
 					message: None,
-					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
+					order: Some(serde_json::Value::String(format!(
+						"0x{}",
+						hex::encode(&request.order)
+					))),
 				}),
 			)
 				.into_response()
@@ -865,7 +900,10 @@ async fn handle_intent_submission(
 					order_id: None,
 					status: "error".to_string(),
 					message: Some(e.to_string()),
-					order: Some(serde_json::Value::String(format!("0x{}", hex::encode(&request.order)))),
+					order: Some(serde_json::Value::String(format!(
+						"0x{}",
+						hex::encode(&request.order)
+					))),
 				}),
 			)
 				.into_response()

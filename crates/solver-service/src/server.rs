@@ -209,8 +209,7 @@ async fn handle_order(
 								"Failed to parse response from discovery API"
 							);
 							(
-								StatusCode::from_u16(status_u16)
-									.unwrap_or(StatusCode::BAD_GATEWAY),
+								StatusCode::from_u16(status_u16).unwrap_or(StatusCode::BAD_GATEWAY),
 								Json(serde_json::json!({
 									"error": "Invalid response from discovery service",
 									"upstream_status": status_u16,
