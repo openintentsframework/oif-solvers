@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.86.0"
 
+[features]
+testing = []
+
 [dependencies]
 regex = "1.10"
 serde = { version = "1.0", features = ["derive"] }

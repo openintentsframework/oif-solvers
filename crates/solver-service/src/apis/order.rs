@@ -250,10 +250,7 @@ mod tests {
 	use mockall::{mock, predicate::eq};
 	use serde_json::json;
 	use solver_account::{implementations::local::LocalWallet, AccountService};
-	use solver_config::{
-		AccountConfig, Config, DeliveryConfig, DiscoveryConfig, OrderConfig, SettlementConfig,
-		SolverConfig, StorageConfig, StrategyConfig,
-	};
+	use solver_config::{Config, ConfigBuilder};
 	use solver_core::{engine::token_manager::TokenManager, EventBus, SolverEngine};
 	use solver_delivery::DeliveryService;
 	use solver_discovery::DiscoveryService;
@@ -284,41 +281,7 @@ mod tests {
 	const TEST_ADDR: &str = "0x1234567890123456789012345678901234567890";
 
 	fn test_cfg() -> Config {
-		Config {
-			solver: SolverConfig {
-				id: "test-solver".into(),
-				monitoring_timeout_minutes: 1,
-			},
-			networks: HashMap::new(),
-			storage: StorageConfig {
-				primary: "memory".into(),
-				implementations: HashMap::new(),
-				cleanup_interval_seconds: 60,
-			},
-			delivery: DeliveryConfig {
-				implementations: HashMap::new(),
-				min_confirmations: 1,
-			},
-			account: AccountConfig {
-				primary: "local".into(),
-				implementations: HashMap::new(),
-			},
-			discovery: DiscoveryConfig {
-				implementations: HashMap::new(),
-			},
-			order: OrderConfig {
-				implementations: HashMap::new(),
-				strategy: StrategyConfig {
-					primary: "simple".into(),
-					implementations: HashMap::new(),
-				},
-			},
-			settlement: SettlementConfig {
-				implementations: HashMap::new(),
-				domain: None,
-			},
-			api: None,
-		}
+		ConfigBuilder::new().build()
 	}
 
 	fn addr() -> solver_types::Address {
