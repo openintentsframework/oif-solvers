@@ -112,7 +112,7 @@ async fn handle_quote(
 		Err(e) => {
 			tracing::warn!("Quote request failed: {}", e);
 			Err(APIError::from(e))
-		}
+		},
 	}
 }
 
@@ -129,7 +129,7 @@ async fn handle_get_order_by_id(
 		Err(e) => {
 			tracing::warn!("Order retrieval failed: {}", e);
 			Err(APIError::from(e))
-		}
+		},
 	}
 }
 
@@ -173,7 +173,7 @@ async fn handle_order(
 				})),
 			)
 				.into_response();
-		}
+		},
 	};
 
 	tracing::debug!("Forwarding order submission to: {}", forward_url);
@@ -189,39 +189,15 @@ async fn handle_order(
 	{
 		Ok(response) => {
 			let status = response.status();
-			let status_u16 = status.as_u16();
-			let bytes_result = response.bytes().await;
-			match bytes_result {
-				Ok(bytes) => {
-					// Try JSON first; if it fails, log and pass through raw text
-					match serde_json::from_slice::<Value>(&bytes) {
-						Ok(body) => {
-							let axum_status = StatusCode::from_u16(status_u16)
-								.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-							(axum_status, Json(body)).into_response()
-						}
-						Err(err) => {
-							let text_preview = String::from_utf8_lossy(&bytes);
-							tracing::warn!(
-								status = status_u16,
-								error = %err,
-								body = %text_preview,
-								"Failed to parse response from discovery API"
-							);
-							(
-								StatusCode::from_u16(status_u16).unwrap_or(StatusCode::BAD_GATEWAY),
-								Json(serde_json::json!({
-									"error": "Invalid response from discovery service",
-									"upstream_status": status_u16,
-									"upstream_body": text_preview
-								})),
-							)
-								.into_response()
-						}
-					}
-				}
-				Err(err) => {
-					tracing::warn!(error = %err, "Failed to read response body from discovery API");
+			match response.json::<Value>().await {
+				Ok(body) => {
+					// Convert reqwest status to axum status
+					let axum_status = StatusCode::from_u16(status.as_u16())
+						.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+					(axum_status, Json(body)).into_response()
+				},
+				Err(e) => {
+					tracing::warn!("Failed to parse response from discovery API: {}", e);
 					(
 						StatusCode::BAD_GATEWAY,
 						Json(serde_json::json!({
@@ -229,9 +205,9 @@ async fn handle_order(
 						})),
 					)
 						.into_response()
-				}
+				},
 			}
-		}
+		},
 		Err(e) => {
 			tracing::warn!("Failed to forward request to discovery API: {}", e);
 			(
@@ -241,6 +217,6 @@ async fn handle_order(
 				})),
 			)
 				.into_response()
-		}
+		},
 	}
 }

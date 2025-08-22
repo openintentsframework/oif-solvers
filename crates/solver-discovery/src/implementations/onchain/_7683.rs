@@ -401,11 +401,11 @@ impl Eip7683Discovery {
 					return;
 				}
 				AlloyAddress::from_slice(&network.input_settler_address.0)
-			}
+			},
 			None => {
 				tracing::error!("Chain ID {} not found in networks config", chain_id);
 				return;
-			}
+			},
 		};
 
 		// Create filter for Open events
@@ -420,7 +420,7 @@ impl Eip7683Discovery {
 			Err(e) => {
 				tracing::error!(chain = chain_id, "Failed to subscribe to logs: {}", e);
 				return;
-			}
+			},
 		};
 
 		let mut stream = subscription.into_stream();
@@ -539,7 +539,7 @@ impl DiscoveryInterface for Eip7683Discovery {
 						)
 						.await;
 					})
-				}
+				},
 				ProviderType::WebSocket(ws_provider) => {
 					let provider = ws_provider.clone();
 					tokio::spawn(async move {
@@ -548,7 +548,7 @@ impl DiscoveryInterface for Eip7683Discovery {
 						)
 						.await;
 					})
-				}
+				},
 			};
 
 			handles.push(handle);

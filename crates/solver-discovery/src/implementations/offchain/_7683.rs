@@ -795,7 +795,7 @@ async fn handle_intent_submission(
 				}),
 			)
 				.into_response();
-		}
+		},
 	};
 	tracing::info!("Parsed order");
 	// Log parsed order details per line for readability
