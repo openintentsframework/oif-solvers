@@ -37,9 +37,10 @@
 //! - Permit2 availability (universal but requires deployment)
 //! - Custom protocol support (token-specific features)
 
-use solver_types::{AvailableInput, LockKind as ApiLockKind, QuoteError};
-
-use super::registry::PROTOCOL_REGISTRY;
+use super::registry::{TokenCapabilities, PROTOCOL_REGISTRY};
+use alloy_primitives::hex;
+use solver_types::{Address, AvailableInput, LockKind as ApiLockKind, QuoteError};
+use std::collections::HashMap;
 
 /// Types of resource locks supported
 #[derive(Debug, Clone)]
@@ -62,11 +63,19 @@ pub enum CustodyDecision {
 }
 
 /// Custody strategy decision engine
-pub struct CustodyStrategy {}
+pub struct CustodyStrategy {
+	/// Cached token capabilities to avoid repeated lookups
+	token_capabilities: HashMap<String, TokenCapabilities>,
+	/// Permit2 contract addresses per chain
+	permit2_addresses: HashMap<u64, Address>,
+}
 
 impl CustodyStrategy {
 	pub fn new() -> Self {
-		Self {}
+		Self {
+			token_capabilities: HashMap::new(),
+			permit2_addresses: Self::default_permit2_addresses(),
+		}
 	}
 
 	pub async fn decide_custody(
@@ -119,6 +128,74 @@ impl CustodyStrategy {
 				"No supported settlement mechanism available for this token".to_string(),
 			))
 		}
+	}
+
+	/// Get token capabilities (with caching)
+	async fn get_token_capabilities(
+		&self,
+		chain_id: u64,
+		token_address: Address,
+	) -> Result<TokenCapabilities, QuoteError> {
+		let cache_key = format!("{}:{:?}", chain_id, token_address);
+
+		if let Some(capabilities) = self.token_capabilities.get(&cache_key) {
+			return Ok(capabilities.clone());
+		}
+
+		// Detect capabilities
+		let capabilities = self
+			.detect_token_capabilities(chain_id, token_address)
+			.await?;
+
+		// Cache for future use
+		// Note: In a real implementation, you'd want a proper cache with TTL
+		// self.token_capabilities.insert(cache_key, capabilities.clone());
+
+		Ok(capabilities)
+	}
+
+	/// Detect token capabilities on-chain
+	async fn detect_token_capabilities(
+		&self,
+		chain_id: u64,
+		_token_address: Address,
+	) -> Result<TokenCapabilities, QuoteError> {
+		// TODO: Implement actual on-chain detection
+		// For now, return conservative defaults
+
+		let permit2_available = self.permit2_addresses.contains_key(&chain_id);
+
+		// TODO: Implement ERC-3009 detection
+		let supports_erc3009 = false; // Conservative default
+
+		Ok(TokenCapabilities {
+			supports_erc3009,
+			permit2_available,
+		})
+	}
+
+	/// Default Permit2 contract addresses per chain
+	pub fn default_permit2_addresses() -> HashMap<u64, Address> {
+		let mut addresses = HashMap::new();
+
+		let permit2_hex = "000000000022D473030F116dDEE9F6B43aC78BA3";
+		let permit2_bytes = hex::decode(permit2_hex).expect("Valid Permit2 address");
+
+		// Ethereum Mainnet
+		addresses.insert(1, Address(permit2_bytes.clone()));
+		// Polygon
+		addresses.insert(137, Address(permit2_bytes.clone()));
+		// Arbitrum
+		addresses.insert(42161, Address(permit2_bytes.clone()));
+		// Optimism
+		addresses.insert(10, Address(permit2_bytes.clone()));
+		// Base
+		addresses.insert(8453, Address(permit2_bytes.clone()));
+		// Local Anvil demo chains
+		addresses.insert(31337, Address(permit2_bytes.clone()));
+		addresses.insert(31338, Address(permit2_bytes));
+
+		addresses
 	}
 }
 
