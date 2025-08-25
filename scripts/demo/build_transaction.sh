@@ -106,8 +106,33 @@ ZERO_BYTES32=0x0000000000000000000000000000000000000000000000000000000000000000
 FILL_DEADLINE=$DEADLINE
 
 echo -e "${YELLOW}🧩 Encoding StandardOrder...${NC}"
-ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" \
-"(${USER_ADDR},${NONCE},${ORIGIN_CHAIN_ID},${EXPIRY},${FILL_DEADLINE},${ORACLE_ADDRESS},[[$ORIGIN_TOKEN,$AMOUNT]],[($ZERO_BYTES32,$OUTPUT_SETTLER_BYTES32,${DEST_CHAIN_ID},$DEST_TOKEN_BYTES32,$AMOUNT,$RECIPIENT_BYTES32,0x,0x)])")
+
+# Build the StandardOrder struct with readable formatting
+# Structure: (user, nonce, originChainId, expiry, fillDeadline, inputOracle, inputs[], outputs[])
+ORDER_STRUCT=$(cat <<EOF
+(
+  ${USER_ADDR},
+  ${NONCE},
+  ${ORIGIN_CHAIN_ID},
+  ${EXPIRY},
+  ${FILL_DEADLINE},
+  ${ORACLE_ADDRESS},
+  [[$ORIGIN_TOKEN,$AMOUNT]],
+  [(
+    $ZERO_BYTES32,
+    $OUTPUT_SETTLER_BYTES32,
+    ${DEST_CHAIN_ID},
+    $DEST_TOKEN_BYTES32,
+    $AMOUNT,
+    $RECIPIENT_BYTES32,
+    0x,
+    0x
+  )]
+)
+EOF
+)
+
+ORDER_DATA=$(cast abi-encode "$STANDARD_ORDER_ABI_TYPE" "$ORDER_STRUCT")
 
 if [ -z "$ORDER_DATA" ]; then
   echo -e "${RED}Failed to encode StandardOrder${NC}"; exit 1
