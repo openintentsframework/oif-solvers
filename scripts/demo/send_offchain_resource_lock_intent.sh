@@ -195,6 +195,11 @@ echo -e "${GREEN}✅ Sponsor signature: $SPONSOR_SIG${NC}"
 # For demo, no allocat0xd93f642f64180aor data (empty bytes)
 ALLOCATOR_DATA="0x"
 
+# Lock type constants - these correspond to the LockType enum in the solver
+LOCK_TYPE_PERMIT2_ESCROW=1      # Permit2-based escrow mechanism
+LOCK_TYPE_EIP3009_ESCROW=2      # EIP-3009 based escrow mechanism  
+LOCK_TYPE_RESOURCE_LOCK=3       # Resource lock mechanism (The Compact)
+
 # Prefix signatures: for Compact we send abi.encode(sponsorSig, allocatorData) as-is (no type prefix)
 SIG_BYTES=$(cast abi-encode "f(bytes,bytes)" "$SPONSOR_SIG" "$ALLOCATOR_DATA")
 COMPACT_SIGNATURE="$SIG_BYTES"
@@ -204,7 +209,7 @@ JSON_PAYLOAD=$(cat <<EOF
   "order": "$ORDER_DATA",
   "sponsor": "$USER_ADDR",
   "signature": "$COMPACT_SIGNATURE",
-  "lock_type": 3
+  "lock_type": $LOCK_TYPE_RESOURCE_LOCK
 }
 EOF
 )

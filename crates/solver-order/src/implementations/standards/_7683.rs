@@ -9,8 +9,8 @@ use alloy_primitives::{Address as AlloyAddress, FixedBytes, U256};
 use alloy_sol_types::{sol, SolCall, SolValue};
 use async_trait::async_trait;
 use solver_types::{
-	oracle::OracleRoutes, Address, ConfigSchema, Eip7683OrderData, ExecutionParams, FillProof,
-	Intent, NetworksConfig, Order, OrderStatus, Schema, Transaction,
+	oracle::OracleRoutes, standards::eip7683::LockType, Address, ConfigSchema, Eip7683OrderData,
+	ExecutionParams, FillProof, Intent, NetworksConfig, Order, OrderStatus, Schema, Transaction,
 };
 
 // Solidity type definitions for EIP-7683 contract interactions.
@@ -373,7 +373,7 @@ impl OrderInterface for Eip7683OrderImpl {
 				OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 			})?;
 		// Skip prepare for Compact (resource lock) flows
-		if matches!(order_data.lock_type, Some(3)) {
+		if matches!(order_data.lock_type, Some(LockType::ResourceLock)) {
 			return Ok(None);
 		}
 		let raw_order_data = order_data.raw_order_data.as_ref().ok_or_else(|| {
@@ -674,7 +674,7 @@ impl OrderInterface for Eip7683OrderImpl {
 					OrderError::ValidationFailed(format!("Failed to parse order data: {}", e))
 				})?;
 			match parsed.lock_type {
-				Some(3) => {
+				Some(LockType::ResourceLock) => {
 					tracing::info!("Processing Compact claim for order {}", order.id);
 
 					let sig_hex = parsed.signature.as_deref().ok_or_else(|| {
@@ -724,7 +724,7 @@ impl OrderInterface for Eip7683OrderImpl {
 		let is_compact = serde_json::from_value::<Eip7683OrderData>(order.data.clone())
 			.ok()
 			.and_then(|d| d.lock_type)
-			.map(|lt| lt == 3)
+			.map(|lt| lt == LockType::ResourceLock)
 			.unwrap_or(false);
 		let input_settler_address = if is_compact {
 			// Prefer compact-specific address if provided
