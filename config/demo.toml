@@ -82,7 +82,6 @@ address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
 [settlement.implementations.direct]
 order = "eip7683"
 network_ids = [31337, 31338]
-oracle_addresses = { 31337 = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6", 31338 = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6" }
 dispute_period_seconds = 1
 # Oracle selection strategy when multiple oracles are available (First, RoundRobin, Random)
 oracle_selection_strategy = "First"
@@ -90,9 +89,9 @@ oracle_selection_strategy = "First"
 # Oracle configuration with multiple oracle support
 [settlement.implementations.direct.oracles]
 # Input oracles (on origin chains)
-input = { 31337 = ["0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"], 31338 = ["0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"] }
+input = { 31337 = ["0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"], 31338 = ["0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"] }
 # Output oracles (on destination chains)
-output = { 31337 = ["0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"], 31338 = ["0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"] }
+output = { 31337 = ["0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"], 31338 = ["0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6"] }
 
 # Valid routes: from origin chain -> to destination chains
 [settlement.implementations.direct.routes]

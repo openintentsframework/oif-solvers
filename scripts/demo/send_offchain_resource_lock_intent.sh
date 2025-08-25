@@ -35,7 +35,16 @@ if [ -f "compact.env" ]; then
   echo -e "${GREEN}✅ Loaded compact.env with TOKEN_ID_HEX=$TOKEN_ID_HEX${NC}"
 fi
 
-ORACLE_ADDRESS=$(grep 'oracle_addresses = ' $MAIN_CONFIG | sed 's/.*31337 = "\([^"]*\)".*/\1/')
+# Extract oracle address from the new config format
+ORACLE_ADDRESS=$(grep -A 3 '\[settlement.implementations.direct.oracles\]' $MAIN_CONFIG | grep 'input = ' | sed 's/.*31337 = \["\([^"]*\)".*/\1/')
+
+if [ -z "$ORACLE_ADDRESS" ]; then
+  echo -e "${RED}❌ Failed to extract ORACLE_ADDRESS from config${NC}"
+  echo -e "${YELLOW}💡 Check that the oracle configuration exists in $MAIN_CONFIG${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}✅ Using Oracle Address: $ORACLE_ADDRESS${NC}"
 
 DEFAULT_ORIGIN_TOKEN=$(awk '/\[\[networks.31337.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' $NETWORKS_CONFIG)
 DEFAULT_DEST_TOKEN=$(awk '/\[\[networks.31338.tokens\]\]/{f=1} f && /address =/{gsub(/"/, "", $3); print $3; exit}' $NETWORKS_CONFIG)
