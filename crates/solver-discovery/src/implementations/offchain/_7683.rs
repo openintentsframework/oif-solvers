@@ -59,7 +59,7 @@ use hex;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use solver_types::{
-	current_timestamp, format_standard_order_lines, normalize_bytes32_address,
+	current_timestamp, normalize_bytes32_address,
 	standards::eip7683::{GasLimitOverrides, MandateOutput},
 	with_0x_prefix, ConfigSchema, Eip7683OrderData, Field, FieldType, ImplementationRegistry,
 	Intent, IntentMetadata, NetworksConfig, Schema,
@@ -106,8 +106,6 @@ sol! {
 		bytes context;
 	}
 }
-
-// Removed local logger; consolidated in `solver_types::utils::format_standard_order_lines`
 
 /// API representation of StandardOrder for JSON deserialization.
 ///
@@ -798,33 +796,6 @@ async fn handle_intent_submission(
 				.into_response();
 		},
 	};
-	tracing::info!("Parsed order");
-	// Log parsed order details per line for readability
-	let first_output = order.outputs.get(0).map(|o| {
-		(
-			o.oracle.0,
-			o.settler.0,
-			o.chainId,
-			o.token.0,
-			o.amount,
-			o.recipient.0,
-			o.call.len(),
-			o.context.len(),
-		)
-	});
-	let lines = format_standard_order_lines(
-		order.user,
-		order.nonce,
-		order.originChainId,
-		order.expires,
-		order.fillDeadline,
-		order.inputOracle,
-		&order.inputs,
-		first_output,
-	);
-	for line in lines {
-		tracing::info!("{}", line);
-	}
 
 	// Validate order
 	if let Err(e) =
