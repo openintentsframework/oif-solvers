@@ -195,7 +195,9 @@ where
 	let v = serde_json::Value::deserialize(deserializer)?;
 	match v {
 		serde_json::Value::Number(n) => {
-			let num = n.as_u64().ok_or_else(|| Error::custom("Invalid number for LockType"))?;
+			let num = n
+				.as_u64()
+				.ok_or_else(|| Error::custom("Invalid number for LockType"))?;
 			if num <= u8::MAX as u64 {
 				LockType::from_u8(num as u8).ok_or_else(|| Error::custom("Invalid LockType value"))
 			} else {
@@ -217,7 +219,9 @@ where
 			}
 		},
 		serde_json::Value::Null => Ok(default_lock_type()),
-		_ => Err(Error::custom("expected number, string, or null for LockType")),
+		_ => Err(Error::custom(
+			"expected number, string, or null for LockType",
+		)),
 	}
 }
 
