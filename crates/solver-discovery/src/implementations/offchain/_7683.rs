@@ -250,6 +250,7 @@ fn default_lock_type() -> u8 {
 /// * `message` - Optional message for additional details on status
 /// * `order` - The submitted EIP-712 typed data order (optional)
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct IntentResponse {
 	#[serde(rename = "orderId")]
 	order_id: Option<String>,
